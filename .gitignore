@@ -1,0 +1,14 @@
+node_modules
+.next
+dist
+build
+.turbo
+*.env.local
+.env
+*.env
+!.env.example
+.DS_Store
+*.log
+coverage
+prisma/migrations
+.cache

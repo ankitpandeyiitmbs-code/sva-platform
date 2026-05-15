@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ── SVA Platform Light Theme ── */
+    --background: 0 0% 99%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 142 72% 29%;        /* SVA Green */
+    --primary-foreground: 0 0% 98%;
+
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 210 40% 94%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 142 72% 29%;
+
+    --radius: 0.5rem;
+
+    /* ── Sidebar ── */
+    --sidebar-background: 222 47% 11%;
+    --sidebar-foreground: 213 27% 84%;
+    --sidebar-border: 220 26% 18%;
+    --sidebar-accent: 220 26% 18%;
+    --sidebar-accent-foreground: 0 0% 98%;
+
+    /* ── Status Colors ── */
+    --success: 142 72% 29%;
+    --warning: 38 92% 50%;
+    --info: 199 89% 48%;
+    --error: 0 84% 60%;
+  }
+
+  .dark {
+    --background: 222 47% 7%;
+    --foreground: 213 27% 94%;
+
+    --card: 222 47% 10%;
+    --card-foreground: 213 27% 94%;
+
+    --popover: 222 47% 10%;
+    --popover-foreground: 213 27% 94%;
+
+    --primary: 142 72% 39%;
+    --primary-foreground: 0 0% 98%;
+
+    --secondary: 220 26% 18%;
+    --secondary-foreground: 213 27% 84%;
+
+    --muted: 220 26% 18%;
+    --muted-foreground: 215 16% 57%;
+
+    --accent: 220 26% 20%;
+    --accent-foreground: 213 27% 94%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 220 26% 18%;
+    --input: 220 26% 18%;
+    --ring: 142 72% 39%;
+
+    --sidebar-background: 222 47% 7%;
+    --sidebar-foreground: 213 27% 84%;
+    --sidebar-border: 220 26% 14%;
+    --sidebar-accent: 220 26% 14%;
+    --sidebar-accent-foreground: 0 0% 98%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { @apply bg-transparent; }
+  ::-webkit-scrollbar-thumb { @apply rounded-full bg-border; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-muted-foreground/40; }
+}
+
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+
+  /* KPI change indicators */
+  .change-positive { @apply text-emerald-600 dark:text-emerald-400; }
+  .change-negative { @apply text-red-600 dark:text-red-400; }
+  .change-neutral  { @apply text-muted-foreground; }
+
+  /* Module color accents */
+  .module-crm      { --module-color: 199 89% 48%; }
+  .module-orders   { --module-color: 38 92% 50%; }
+  .module-inventory{ --module-color: 142 72% 29%; }
+  .module-support  { --module-color: 271 81% 56%; }
+  .module-finance  { --module-color: 142 72% 29%; }
+  .module-marketing{ --module-color: 330 81% 56%; }
+  .module-projects { --module-color: 199 89% 48%; }
+  .module-chat     { --module-color: 25 95% 53%; }
+}

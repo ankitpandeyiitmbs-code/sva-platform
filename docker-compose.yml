@@ -1,0 +1,133 @@
+version: '3.9'
+
+services:
+  # ── PostgreSQL ────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: sva_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sva_user
+      POSTGRES_PASSWORD: sva_secret
+      POSTGRES_DB: sva_platform
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U sva_user -d sva_platform']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ─────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: sva_redis
+    restart: unless-stopped
+    command: redis-server --requirepass sva_redis_secret --appendonly yes
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '--pass', 'sva_redis_secret', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MinIO (S3-compatible file storage) ────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: sva_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: sva_minio_user
+      MINIO_ROOT_PASSWORD: sva_minio_secret
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ── MailHog (local email testing) ─────────────────────
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: sva_mailhog
+    restart: unless-stopped
+    ports:
+      - '1025:1025'   # SMTP
+      - '8025:8025'   # Web UI
+
+  # ── API Backend ───────────────────────────────────────
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.dev
+    container_name: sva_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://sva_user:sva_secret@postgres:5432/sva_platform
+      REDIS_URL: redis://:sva_redis_secret@redis:6379
+      JWT_SECRET: change-this-in-production-use-32-chars-min
+      JWT_REFRESH_SECRET: change-this-refresh-secret-also-32-chars
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: sva_minio_user
+      MINIO_SECRET_KEY: sva_minio_secret
+      MINIO_BUCKET: sva-uploads
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_USER: ''
+      SMTP_PASS: ''
+      PORT: 4000
+    ports:
+      - '4000:4000'
+    volumes:
+      - ./apps/api:/app
+      - /app/node_modules
+    command: npm run dev
+
+  # ── Web Frontend ──────────────────────────────────────
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile.dev
+    container_name: sva_web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_APP_NAME: SVA Platform
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: change-this-nextauth-secret-32-chars
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  default:
+    name: sva_network
