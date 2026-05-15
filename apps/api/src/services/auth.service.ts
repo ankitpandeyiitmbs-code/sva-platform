@@ -18,8 +18,8 @@ export class AuthService {
       permissions: ROLE_PERMISSIONS[user.role as Role] ?? [],
     }
 
-    const accessToken = jwt.sign(payload, env.JWT_SECRET, { expiresIn: env.JWT_ACCESS_EXPIRY })
-    const refreshToken = jwt.sign({ sub: user.id }, env.JWT_REFRESH_SECRET, { expiresIn: env.JWT_REFRESH_EXPIRY })
+    const accessToken = jwt.sign(payload, env.JWT_SECRET, { expiresIn: env.JWT_ACCESS_EXPIRY as any })
+    const refreshToken = jwt.sign({ sub: user.id }, env.JWT_REFRESH_SECRET, { expiresIn: env.JWT_REFRESH_EXPIRY as any })
 
     return { accessToken, refreshToken, expiresIn: 15 * 60 }
   }
