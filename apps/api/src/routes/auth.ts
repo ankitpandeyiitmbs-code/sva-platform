@@ -43,7 +43,7 @@ export async function authRoutes(app: FastifyInstance) {
     if (!body.success) return reply.code(400).send({ success: false, errors: body.error.flatten() })
 
     try {
-      const result = await authService.register(body.data)
+      const result = await authService.register(body.data as any)
       return reply.code(201).send({ success: true, data: result })
     } catch (err: any) {
       return reply.code(400).send({ success: false, message: err.message })

@@ -77,12 +77,13 @@ export class AnalyticsService {
     const buckets: Map<string, { date: string; revenue: number; orders: number; profit: number }> = new Map()
 
     let intervals: Date[]
+    const interval = { start: range.from, end: range.to }
     if (granularity === 'day') {
-      intervals = eachDayOfInterval(range)
+      intervals = eachDayOfInterval(interval)
     } else if (granularity === 'week') {
-      intervals = eachWeekOfInterval(range)
+      intervals = eachWeekOfInterval(interval)
     } else {
-      intervals = eachMonthOfInterval(range)
+      intervals = eachMonthOfInterval(interval)
     }
 
     const fmt = granularity === 'day' ? 'yyyy-MM-dd' : granularity === 'week' ? 'yyyy-ww' : 'yyyy-MM'

@@ -190,7 +190,7 @@ export async function chatRoutes(app: FastifyInstance) {
             title: tasks[0].slice(0, 120),
             status: 'TODO',
             priority: 'MEDIUM',
-            createdBy: req.user.sub,
+            creatorId: req.user.sub,
             assigneeId: req.user.sub,
             dueDate: dueDate ?? undefined,
             description: `Auto-detected from chat message by ${req.user.email}`,
