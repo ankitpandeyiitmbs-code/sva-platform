@@ -89,7 +89,7 @@ export async function marketingRoutes(app: FastifyInstance) {
     if (!original) return reply.code(404).send({ success: false })
     const { id: _id, createdAt, updatedAt, sentAt, scheduledAt, stats, ...rest } = original
     const copy = await prisma.campaign.create({
-      data: { ...rest, name: `${rest.name} (Copy)`, status: 'DRAFT', stats: {} },
+      data: { ...rest, name: `${rest.name} (Copy)`, status: 'DRAFT', stats: {}, content: rest.content ?? undefined },
     })
     return reply.code(201).send({ success: true, data: copy })
   })
