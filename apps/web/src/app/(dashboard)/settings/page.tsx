@@ -1,10 +1,11 @@
 'use client'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { Settings, Link2, Users, Shield, Bell, Palette } from 'lucide-react'
+import { Link2, Users, Shield, Bell, RefreshCw, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
+import { useSearchParams } from 'next/navigation'
 
 const CHANNEL_CONFIGS = [
   { key: 'AMAZON_US', label: 'Amazon US', fields: ['clientId', 'clientSecret', 'refreshToken'] },
@@ -13,7 +14,6 @@ const CHANNEL_CONFIGS = [
   { key: 'AMAZON_UK', label: 'Amazon UK', fields: ['clientId', 'clientSecret', 'refreshToken'] },
   { key: 'AMAZON_AU', label: 'Amazon Australia', fields: ['clientId', 'clientSecret', 'refreshToken'] },
   { key: 'WALMART', label: 'Walmart', fields: ['clientId', 'clientSecret'] },
-  { key: 'TIKTOK_SHOP', label: 'TikTok Shop', fields: ['appKey', 'appSecret', 'accessToken'] },
   { key: 'SHOPIFY', label: 'Shopify', fields: ['storeUrl', 'accessToken'] },
   { key: 'MYNTRA', label: 'Myntra', fields: ['partnerId', 'apiKey'] },
   { key: 'FLIPKART', label: 'Flipkart', fields: ['appId', 'appSecret'] },
@@ -21,11 +21,34 @@ const CHANNEL_CONFIGS = [
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<'channels' | 'team' | 'security' | 'notifications'>('channels')
+  const searchParams = useSearchParams()
+  const queryClient = useQueryClient()
 
-  const { data: channels } = useQuery({
+  const { data: channels, refetch: refetchChannels } = useQuery({
     queryKey: ['channels'],
     queryFn: () => api.get('/channels').then((r) => r.data.data),
   })
+
+  const { data: tiktokStatus, refetch: refetchTiktok } = useQuery({
+    queryKey: ['tiktok-status'],
+    queryFn: () => api.get('/tiktok/status').then((r) => r.data.data),
+    refetchInterval: 10000,
+  })
+
+  // Handle TikTok OAuth callback result
+  useEffect(() => {
+    const tiktok = searchParams.get('tiktok')
+    if (tiktok === 'connected') {
+      toast.success('TikTok Shop connected! Syncing your data...')
+      refetchTiktok()
+      refetchChannels()
+      window.history.replaceState({}, '', '/settings')
+    } else if (tiktok === 'error') {
+      const reason = searchParams.get('reason') ?? 'Unknown error'
+      toast.error(`TikTok connection failed: ${reason}`)
+      window.history.replaceState({}, '', '/settings')
+    }
+  }, [searchParams])
 
   const tabs = [
     { key: 'channels', label: 'Channel Integrations', icon: Link2 },
@@ -53,6 +76,9 @@ export default function SettingsPage() {
 
       {tab === 'channels' && (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          {/* TikTok Shop — OAuth Card */}
+          <TikTokCard status={tiktokStatus} onRefresh={refetchTiktok} />
+          {/* Other channels — manual credentials */}
           {CHANNEL_CONFIGS.map((cfg) => {
             const existing = (channels ?? []).find((c: any) => c.channel === cfg.key)
             const isConnected = existing?.status === 'CONNECTED'
@@ -73,6 +99,119 @@ export default function SettingsPage() {
 
       {tab === 'notifications' && (
         <div className="rounded-xl border p-6 text-center text-muted-foreground">Notification preferences — coming soon</div>
+      )}
+    </div>
+  )
+}
+
+function TikTokCard({ status, onRefresh }: { status: any; onRefresh: () => void }) {
+  const [connecting, setConnecting] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [disconnecting, setDisconnecting] = useState(false)
+  const connected = status?.connected
+
+  const handleConnect = async () => {
+    setConnecting(true)
+    try {
+      const { data } = await api.get('/tiktok/connect')
+      window.location.href = data.data.authUrl
+    } catch {
+      toast.error('Failed to get TikTok auth URL')
+      setConnecting(false)
+    }
+  }
+
+  const handleSync = async () => {
+    setSyncing(true)
+    try {
+      const { data } = await api.post('/tiktok/sync')
+      toast.success(`Synced ${data.data.orders.synced} orders & ${data.data.products.synced} products`)
+      onRefresh()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? 'Sync failed')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const handleDisconnect = async () => {
+    setDisconnecting(true)
+    try {
+      await api.delete('/tiktok/disconnect')
+      toast.success('TikTok Shop disconnected')
+      onRefresh()
+    } catch {
+      toast.error('Failed to disconnect')
+    } finally {
+      setDisconnecting(false)
+    }
+  }
+
+  return (
+    <div className={cn('rounded-xl border-2 p-4', connected ? 'border-[#fe2c55]/30 bg-[#fe2c55]/5' : 'border-border')}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          {/* TikTok logo */}
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-black text-white font-bold text-lg">
+            T
+          </div>
+          <div>
+            <p className="font-semibold">TikTok Shop</p>
+            {connected ? (
+              <p className="text-xs text-green-600 font-medium flex items-center gap-1">
+                <CheckCircle2 className="h-3 w-3" /> Connected — {status.shopName}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">Not connected</p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {connected ? (
+            <>
+              <button
+                onClick={handleSync}
+                disabled={syncing}
+                className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+              >
+                {syncing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                {syncing ? 'Syncing...' : 'Sync Now'}
+              </button>
+              <button
+                onClick={handleDisconnect}
+                disabled={disconnecting}
+                className="flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+              >
+                <XCircle className="h-3 w-3" />
+                Disconnect
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={handleConnect}
+              disabled={connecting}
+              className="flex items-center gap-2 rounded-lg bg-[#fe2c55] px-4 py-2 text-sm font-medium text-white hover:bg-[#fe2c55]/90 disabled:opacity-50"
+            >
+              {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {connecting ? 'Redirecting...' : 'Connect TikTok Shop'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {connected && status.lastSyncAt && (
+        <div className="mt-3 flex items-center gap-4 border-t pt-3 text-xs text-muted-foreground">
+          <span>Last sync: {new Date(status.lastSyncAt).toLocaleString()}</span>
+          <span className={cn('font-medium', status.lastSyncStatus === 'SUCCESS' ? 'text-green-600' : 'text-yellow-600')}>
+            {status.lastSyncStatus}
+          </span>
+        </div>
+      )}
+
+      {!connected && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Click Connect to authorize SVA Platform to access your TikTok Shop orders, products & inventory.
+        </p>
       )}
     </div>
   )

@@ -12,6 +12,7 @@ const PUBLIC_ROUTES = [
   '/api/v1/auth/forgot-password',
   '/api/v1/auth/reset-password',
   '/api/v1/webhooks/',
+  '/api/v1/tiktok/callback',
 ]
 
 declare module 'fastify' {
