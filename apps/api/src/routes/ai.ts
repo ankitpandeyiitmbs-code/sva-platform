@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { prisma } from '@sva/db'
+import { prisma } from '../lib/db'
 import { env } from '../utils/env'
 
 export async function aiRoutes(app: FastifyInstance) {

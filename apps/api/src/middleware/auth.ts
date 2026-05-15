@@ -1,7 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import jwt from 'jsonwebtoken'
 import { env } from '../utils/env'
-import type { JWTPayload } from '@sva/types'
+import type { JWTPayload } from '../lib/types'
 
 const PUBLIC_ROUTES = [
   '/health',

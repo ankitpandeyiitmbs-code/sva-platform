@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { prisma } from '@sva/db'
+import { prisma } from '../lib/db'
 
 export async function inventoryRoutes(app: FastifyInstance) {
   app.get('/products', async (req, reply) => {

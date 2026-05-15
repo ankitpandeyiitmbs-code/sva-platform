@@ -1,4 +1,4 @@
-import { prisma } from '@sva/db'
+import { prisma } from '../lib/db'
 import { subDays, subMonths, subYears, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, eachDayOfInterval, eachWeekOfInterval, eachMonthOfInterval, format } from 'date-fns'
 
 export type Period = '7d' | '30d' | '90d' | '12m' | 'mtd' | 'ytd' | 'custom'

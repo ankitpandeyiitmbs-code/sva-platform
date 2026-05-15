@@ -2,10 +2,10 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import speakeasy from 'speakeasy'
 import qrcode from 'qrcode'
-import { prisma } from '@sva/db'
+import { prisma } from '../lib/db'
 import { env } from '../utils/env'
-import { ROLE_PERMISSIONS } from '@sva/types'
-import type { JWTPayload, AuthTokens, Role } from '@sva/types'
+import { ROLE_PERMISSIONS } from '../lib/types'
+import type { JWTPayload, AuthTokens, Role } from '../lib/types'
 
 export class AuthService {
   // ── Token Generation ──────────────────────────────────

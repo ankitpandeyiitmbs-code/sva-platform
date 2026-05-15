@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { prisma } from '@sva/db'
+import { prisma } from '../lib/db'
 
 const DEFAULT_STAGES = [
   { id: 'lead', name: 'Lead', color: '#6B7280', position: 0 },

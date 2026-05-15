@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { prisma } from '@sva/db'
+import { prisma } from '../lib/db'
 
 export async function ticketRoutes(app: FastifyInstance) {
   // ── List tickets ──────────────────────────────────────
