@@ -49,7 +49,8 @@ export function Sidebar() {
   const { user, logout } = useAuthStore()
   const [collapsed, setCollapsed] = useState(false)
 
-  const userPermissions = user?.permissions ?? []
+  // Show all items when no user (no backend connected yet); otherwise filter by permissions
+  const userPermissions = user?.permissions ?? NAV_SECTIONS.flatMap(s => s.items.map(i => i.permission))
 
   return (
     <aside className={cn(
