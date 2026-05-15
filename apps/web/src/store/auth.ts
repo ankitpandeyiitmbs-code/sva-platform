@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { jwtDecode } from 'jwt-decode'
-import type { JWTPayload } from '@sva/types'
+import type { JWTPayload } from '@/types'
 import { api, setAuthTokens, clearAuthTokens } from '@/lib/api'
 
 interface AuthState {
