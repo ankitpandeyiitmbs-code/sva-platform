@@ -23,6 +23,7 @@ import { analyticsRoutes } from './routes/analytics'
 import { crmRoutes } from './routes/crm'
 import { marketingRoutes } from './routes/marketing'
 import { tiktokRoutes } from './routes/tiktok'
+import { amazonRoutes } from './routes/amazon'
 import { authMiddleware } from './middleware/auth'
 
 export const app = Fastify({
@@ -98,6 +99,7 @@ async function bootstrap() {
   await app.register(marketingRoutes, { prefix: `${API}/marketing` })
   await app.register(webhookRoutes, { prefix: `${API}/webhooks` })
   await app.register(tiktokRoutes, { prefix: `${API}/tiktok` })
+  await app.register(amazonRoutes, { prefix: `${API}/amazon` })
 
   // ── Start ─────────────────────────────────────────────
   try {

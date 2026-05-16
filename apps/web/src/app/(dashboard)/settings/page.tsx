@@ -174,15 +174,35 @@ function ChannelCard({ config, existing, isConnected, tiktokStatus }: any) {
   }
 
   // ── Regular credential-based channels ─────────────
+  const isAmazon = config.key.startsWith('AMAZON_')
+
   const handleSave = async () => {
     setSaving(true)
     try {
       await api.put(`/channels/${config.key}`, { credentials: values, displayName: config.label })
       toast.success(`${config.label} connected successfully`)
+      setExpanded(false)
     } catch {
       toast.error('Failed to save credentials')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleSync = async () => {
+    setSyncing(true)
+    try {
+      if (isAmazon) {
+        const { data } = await api.post(`/amazon/${config.key}/sync`)
+        toast.success(`Synced ${data.data.orders.synced} orders & ${data.data.inventory.synced} products`)
+      } else {
+        await api.post(`/channels/${config.key}/sync`)
+        toast.success(`${config.label} sync started`)
+      }
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message ?? 'Sync failed')
+    } finally {
+      setSyncing(false)
     }
   }
 
@@ -194,11 +214,25 @@ function ChannelCard({ config, existing, isConnected, tiktokStatus }: any) {
           <div>
             <p className="font-medium">{config.label}</p>
             <p className="text-xs text-muted-foreground">{isConnected ? 'Connected' : 'Not connected'}</p>
+            {isConnected && existing?.lastSyncAt && (
+              <p className="text-xs text-muted-foreground/60">
+                Last sync: {new Date(existing.lastSyncAt).toLocaleString()}
+              </p>
+            )}
           </div>
         </div>
-        <button onClick={() => setExpanded(!expanded)} className="rounded-lg border px-3 py-1.5 text-xs hover:bg-muted">
-          {isConnected ? 'Edit' : 'Connect'}
-        </button>
+        <div className="flex gap-2">
+          {isConnected && (
+            <button onClick={handleSync} disabled={syncing}
+              className="flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-50">
+              {syncing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+              {syncing ? 'Syncing...' : 'Sync'}
+            </button>
+          )}
+          <button onClick={() => setExpanded(!expanded)} className="rounded-lg border px-3 py-1.5 text-xs hover:bg-muted">
+            {isConnected ? 'Edit' : 'Connect'}
+          </button>
+        </div>
       </div>
       {expanded && (
         <div className="mt-4 space-y-3 border-t pt-4">
@@ -212,6 +246,12 @@ function ChannelCard({ config, existing, isConnected, tiktokStatus }: any) {
               />
             </div>
           ))}
+          {isAmazon && (
+            <p className="text-xs text-muted-foreground rounded-lg bg-muted/50 p-3">
+              Get credentials from <strong>Amazon Seller Central → Apps & Services → Develop Apps</strong>.
+              You need: Client ID, Client Secret, and Refresh Token from your SP-API app.
+            </p>
+          )}
           <button onClick={handleSave} disabled={saving}
             className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90 disabled:opacity-50">
             {saving ? 'Saving...' : 'Save & Connect'}
