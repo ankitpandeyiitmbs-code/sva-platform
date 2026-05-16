@@ -2,9 +2,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { formatCurrency, cn } from '@/lib/utils'
-import { Search, AlertTriangle, Package, Warehouse, TruckIcon, Plus, X, Loader2 } from 'lucide-react'
+import { Search, AlertTriangle, Package, Warehouse, TruckIcon, Plus, X, Loader2, Zap } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
+import Link from 'next/link'
 
 // ── Modal wrapper ─────────────────────────────────────
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
@@ -103,6 +104,10 @@ export default function InventoryPage() {
             </button>
           ))}
         </div>
+        <Link href="/inventory/intelligence"
+          className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-100 dark:bg-amber-950/30 dark:border-amber-900 dark:text-amber-400 transition-colors">
+          <Zap className="h-4 w-4" /> Intelligence
+        </Link>
         <div className="ml-auto">
           {tab === 'products' && (
             <button onClick={() => setModal('product')} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90">

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { syncOrders, syncInventory, getStatus } from '../services/amazon.service'
+import { autoUpdateReorderPoints } from '../services/inventory-intelligence.service'
 
 const AMAZON_CHANNELS = ['AMAZON_US', 'AMAZON_IN', 'AMAZON_AE', 'AMAZON_UK', 'AMAZON_AU']
 
@@ -28,6 +29,8 @@ export async function amazonRoutes(app: FastifyInstance) {
         syncOrders(req.user.orgId, channel),
         syncInventory(req.user.orgId, channel),
       ])
+      // Auto-update reorder points based on fresh sales velocity
+      autoUpdateReorderPoints(req.user.orgId, channel).catch(() => {})
       return reply.send({ success: true, data: { orders, inventory } })
     } catch (err: any) {
       app.log.error(err)
@@ -52,6 +55,8 @@ export async function amazonRoutes(app: FastifyInstance) {
       }
     }
 
+    // Auto-update all reorder points after full sync
+    autoUpdateReorderPoints(req.user.orgId).catch(() => {})
     return reply.send({ success: true, data: results })
   })
 }
