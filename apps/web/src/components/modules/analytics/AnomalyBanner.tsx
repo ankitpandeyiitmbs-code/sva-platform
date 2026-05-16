@@ -1,52 +1,40 @@
 'use client'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { AlertTriangle, TrendingDown, TrendingUp, X } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { AlertTriangle, X } from 'lucide-react'
 import { useState } from 'react'
+import { cn } from '@/lib/utils'
 
 export function AnomalyBanner() {
   const [dismissed, setDismissed] = useState<string[]>([])
   const { data } = useQuery({
-    queryKey: ['analytics', 'anomalies'],
+    queryKey: ['anomalies'],
     queryFn: () => api.get('/analytics/anomalies').then((r) => r.data.data),
-    refetchInterval: 5 * 60 * 1000,
+    refetchInterval: 60000,
   })
 
-  const anomalies = (data ?? []).filter((a: any) => !dismissed.includes(a.metric + a.message))
+  const anomalies = (data ?? []).filter((a: any) => !dismissed.includes(a.type))
   if (!anomalies.length) return null
 
   return (
     <div className="space-y-2">
-      {anomalies.map((a: any) => {
-        const key = a.metric + a.message
-        return (
-          <div key={key} className={cn(
-            'flex items-start gap-3 rounded-lg border px-4 py-3',
-            a.severity === 'critical'
-              ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/30'
-              : 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30'
-          )}>
-            <AlertTriangle className={cn('mt-0.5 h-4 w-4 shrink-0', a.severity === 'critical' ? 'text-red-600' : 'text-amber-600')} />
-            <div className="flex-1 min-w-0">
-              <p className={cn('text-sm font-semibold', a.severity === 'critical' ? 'text-red-800 dark:text-red-300' : 'text-amber-800 dark:text-amber-300')}>
-                {a.metric}
-              </p>
-              <p className={cn('text-xs mt-0.5', a.severity === 'critical' ? 'text-red-700 dark:text-red-400' : 'text-amber-700 dark:text-amber-400')}>
-                {a.message}
-              </p>
-            </div>
-            {a.change !== undefined && (
-              <span className={cn('shrink-0 text-sm font-bold', a.change < 0 ? 'text-red-600' : 'text-amber-600')}>
-                {a.change > 0 ? '+' : ''}{a.change.toFixed(1)}%
-              </span>
-            )}
-            <button onClick={() => setDismissed([...dismissed, key])} className="shrink-0 text-muted-foreground hover:text-foreground">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )
-      })}
+      {anomalies.map((a: any) => (
+        <div
+          key={a.type}
+          className={cn(
+            'flex items-center gap-3 rounded-lg px-4 py-3 text-sm',
+            a.severity === 'high' ? 'bg-red-50 text-red-800 border border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900' :
+            a.severity === 'medium' ? 'bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-900' :
+            'bg-blue-50 text-blue-800 border border-blue-200 dark:bg-blue-950/30 dark:text-blue-300 dark:border-blue-900'
+          )}
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span className="flex-1">{a.message}</span>
+          <button onClick={() => setDismissed((d) => [...d, a.type])} className="rounded p-0.5 hover:bg-black/10">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ))}
     </div>
   )
 }

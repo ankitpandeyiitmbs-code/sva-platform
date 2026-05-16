@@ -1,51 +1,52 @@
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
-import { cn, formatCurrency, formatNumber, formatPercent } from '@/lib/utils'
+'use client'
+import { cn, formatCurrency, formatNumber } from '@/lib/utils'
+import { TrendingUp, TrendingDown } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
-interface Props {
+interface KpiCardProps {
   label: string
-  value: string | number
-  change?: number
-  format?: 'currency' | 'number' | 'percent' | 'raw'
-  currency?: string
-  icon?: LucideIcon
-  iconColor?: string
-  iconBg?: string
+  value: number
+  change?: number | null
+  format?: 'currency' | 'number' | 'percent'
   sublabel?: string
-  alert?: boolean
+  icon: LucideIcon
+  iconColor: string
+  iconBg: string
+  isLoading?: boolean
 }
 
-export function KpiCard({ label, value, change, format = 'raw', currency = 'USD', icon: Icon, iconColor, iconBg, sublabel, alert }: Props) {
-  const formatted =
-    format === 'currency' ? formatCurrency(Number(value), currency as any)
-    : format === 'number' ? formatNumber(Number(value))
-    : format === 'percent' ? `${Number(value).toFixed(1)}%`
-    : String(value)
+export function KpiCard({ label, value, change, format = 'currency', sublabel, icon: Icon, iconColor, iconBg, isLoading }: KpiCardProps) {
+  if (isLoading) {
+    return (
+      <div className="rounded-xl border p-5 space-y-3">
+        <div className="h-4 w-24 animate-pulse rounded bg-muted" />
+        <div className="h-8 w-32 animate-pulse rounded bg-muted" />
+        <div className="h-3 w-20 animate-pulse rounded bg-muted" />
+      </div>
+    )
+  }
+
+  const formatted = format === 'currency' ? formatCurrency(value) : format === 'percent' ? `${value.toFixed(1)}%` : formatNumber(value)
+  const isPositive = (change ?? 0) >= 0
 
   return (
-    <div className={cn('rounded-xl border bg-card p-5 transition-shadow hover:shadow-md', alert && 'border-amber-300 dark:border-amber-700')}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-muted-foreground truncate">{label}</p>
-          <p className="mt-1 text-2xl font-bold tracking-tight">{formatted}</p>
-          {sublabel && <p className="mt-0.5 text-xs text-muted-foreground">{sublabel}</p>}
-          {change !== undefined && (
-            <div className={cn('mt-1.5 flex items-center gap-1 text-xs font-medium',
-              change > 0 ? 'text-emerald-600 dark:text-emerald-400'
-              : change < 0 ? 'text-red-600 dark:text-red-400'
-              : 'text-muted-foreground'
-            )}>
-              {change > 0 ? <TrendingUp className="h-3 w-3" /> : change < 0 ? <TrendingDown className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
-              {formatPercent(change)} vs prev period
-            </div>
-          )}
+    <div className="rounded-xl border p-5 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-muted-foreground">{label}</p>
+        <div className={cn('flex h-9 w-9 items-center justify-center rounded-lg', iconBg)}>
+          <Icon className={cn('h-4 w-4', iconColor)} />
         </div>
-        {Icon && (
-          <div className={cn('shrink-0 rounded-xl p-2.5', iconBg ?? 'bg-muted')}>
-            <Icon className={cn('h-5 w-5', iconColor ?? 'text-muted-foreground')} />
-          </div>
-        )}
       </div>
+      <div>
+        <p className="text-2xl font-bold tracking-tight">{formatted}</p>
+        {sublabel && <p className="text-xs text-muted-foreground mt-0.5">{sublabel}</p>}
+      </div>
+      {change !== undefined && change !== null && (
+        <div className={cn('flex items-center gap-1 text-xs font-medium', isPositive ? 'text-emerald-600' : 'text-red-500')}>
+          {isPositive ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+          {isPositive ? '+' : ''}{change.toFixed(1)}% vs prior period
+        </div>
+      )}
     </div>
   )
 }
