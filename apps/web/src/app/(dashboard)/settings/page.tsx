@@ -6,7 +6,6 @@ import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Link2, Users, Shield, Bell, RefreshCw, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
-import { useSearchParams } from 'next/navigation'
 
 const CHANNEL_CONFIGS = [
   { key: 'AMAZON_US', label: 'Amazon US', fields: ['clientId', 'clientSecret', 'refreshToken'] },
@@ -22,7 +21,6 @@ const CHANNEL_CONFIGS = [
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<'channels' | 'team' | 'security' | 'notifications'>('channels')
-  const searchParams = useSearchParams()
   const queryClient = useQueryClient()
 
   const { data: channels, refetch: refetchChannels } = useQuery({
@@ -38,18 +36,19 @@ export default function SettingsPage() {
 
   // Handle TikTok OAuth callback result
   useEffect(() => {
-    const tiktok = searchParams.get('tiktok')
+    const params = new URLSearchParams(window.location.search)
+    const tiktok = params.get('tiktok')
     if (tiktok === 'connected') {
       toast.success('TikTok Shop connected! Syncing your data...')
       refetchTiktok()
       refetchChannels()
       window.history.replaceState({}, '', '/settings')
     } else if (tiktok === 'error') {
-      const reason = searchParams.get('reason') ?? 'Unknown error'
+      const reason = params.get('reason') ?? 'Unknown error'
       toast.error(`TikTok connection failed: ${reason}`)
       window.history.replaceState({}, '', '/settings')
     }
-  }, [searchParams])
+  }, [])
 
   const tabs = [
     { key: 'channels', label: 'Channel Integrations', icon: Link2 },
