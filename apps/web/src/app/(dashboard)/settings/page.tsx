@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { Link2, Users, Shield, Bell, RefreshCw, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 
 const CHANNEL_CONFIGS = [
+  { key: 'TIKTOK_SHOP', label: 'TikTok Shop', oauth: true, fields: [] },
   { key: 'AMAZON_US', label: 'Amazon US', fields: ['clientId', 'clientSecret', 'refreshToken'] },
   { key: 'AMAZON_IN', label: 'Amazon India', fields: ['clientId', 'clientSecret', 'refreshToken'] },
   { key: 'AMAZON_AE', label: 'Amazon UAE', fields: ['clientId', 'clientSecret', 'refreshToken'] },
@@ -76,14 +77,12 @@ export default function SettingsPage() {
 
       {tab === 'channels' && (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          {/* TikTok Shop — OAuth Card */}
-          <TikTokCard status={tiktokStatus} onRefresh={refetchTiktok} />
-          {/* Other channels — manual credentials */}
           {CHANNEL_CONFIGS.map((cfg) => {
             const existing = (channels ?? []).find((c: any) => c.channel === cfg.key)
             const isConnected = existing?.status === 'CONNECTED'
             return (
-              <ChannelCard key={cfg.key} config={cfg} existing={existing} isConnected={isConnected} />
+              <ChannelCard key={cfg.key} config={cfg} existing={existing} isConnected={isConnected}
+                tiktokStatus={cfg.key === 'TIKTOK_SHOP' ? tiktokStatus : undefined} />
             )
           })}
         </div>
@@ -104,124 +103,77 @@ export default function SettingsPage() {
   )
 }
 
-function TikTokCard({ status, onRefresh }: { status: any; onRefresh: () => void }) {
-  const [connecting, setConnecting] = useState(false)
-  const [syncing, setSyncing] = useState(false)
-  const [disconnecting, setDisconnecting] = useState(false)
-  const connected = status?.connected
-
-  const handleConnect = async () => {
-    setConnecting(true)
-    try {
-      const { data } = await api.get('/tiktok/connect')
-      window.location.href = data.data.authUrl
-    } catch {
-      toast.error('Failed to get TikTok auth URL')
-      setConnecting(false)
-    }
-  }
-
-  const handleSync = async () => {
-    setSyncing(true)
-    try {
-      const { data } = await api.post('/tiktok/sync')
-      toast.success(`Synced ${data.data.orders.synced} orders & ${data.data.products.synced} products`)
-      onRefresh()
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message ?? 'Sync failed')
-    } finally {
-      setSyncing(false)
-    }
-  }
-
-  const handleDisconnect = async () => {
-    setDisconnecting(true)
-    try {
-      await api.delete('/tiktok/disconnect')
-      toast.success('TikTok Shop disconnected')
-      onRefresh()
-    } catch {
-      toast.error('Failed to disconnect')
-    } finally {
-      setDisconnecting(false)
-    }
-  }
-
-  return (
-    <div className={cn('rounded-xl border-2 p-4', connected ? 'border-[#fe2c55]/30 bg-[#fe2c55]/5' : 'border-border')}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {/* TikTok logo */}
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-black text-white font-bold text-lg">
-            T
-          </div>
-          <div>
-            <p className="font-semibold">TikTok Shop</p>
-            {connected ? (
-              <p className="text-xs text-green-600 font-medium flex items-center gap-1">
-                <CheckCircle2 className="h-3 w-3" /> Connected — {status.shopName}
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">Not connected</p>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {connected ? (
-            <>
-              <button
-                onClick={handleSync}
-                disabled={syncing}
-                className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
-              >
-                {syncing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                {syncing ? 'Syncing...' : 'Sync Now'}
-              </button>
-              <button
-                onClick={handleDisconnect}
-                disabled={disconnecting}
-                className="flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-              >
-                <XCircle className="h-3 w-3" />
-                Disconnect
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={handleConnect}
-              disabled={connecting}
-              className="flex items-center gap-2 rounded-lg bg-[#fe2c55] px-4 py-2 text-sm font-medium text-white hover:bg-[#fe2c55]/90 disabled:opacity-50"
-            >
-              {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {connecting ? 'Redirecting...' : 'Connect TikTok Shop'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {connected && status.lastSyncAt && (
-        <div className="mt-3 flex items-center gap-4 border-t pt-3 text-xs text-muted-foreground">
-          <span>Last sync: {new Date(status.lastSyncAt).toLocaleString()}</span>
-          <span className={cn('font-medium', status.lastSyncStatus === 'SUCCESS' ? 'text-green-600' : 'text-yellow-600')}>
-            {status.lastSyncStatus}
-          </span>
-        </div>
-      )}
-
-      {!connected && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          Click Connect to authorize SVA Platform to access your TikTok Shop orders, products & inventory.
-        </p>
-      )}
-    </div>
-  )
-}
-
-function ChannelCard({ config, existing, isConnected }: any) {
+function ChannelCard({ config, existing, isConnected, tiktokStatus }: any) {
   const [expanded, setExpanded] = useState(false)
   const [values, setValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
+  // ── TikTok OAuth flow ──────────────────────────────
+  if (config.oauth) {
+    const connected = tiktokStatus?.connected
+    const handleConnect = async () => {
+      try {
+        const { data } = await api.get('/tiktok/connect')
+        window.location.href = data.data.authUrl
+      } catch { toast.error('Failed to start TikTok connection') }
+    }
+    const handleSync = async () => {
+      setSyncing(true)
+      try {
+        const { data } = await api.post('/tiktok/sync')
+        toast.success(`Synced ${data.data.orders.synced} orders & ${data.data.products.synced} products`)
+      } catch (e: any) { toast.error(e?.response?.data?.message ?? 'Sync failed') }
+      finally { setSyncing(false) }
+    }
+    const handleDisconnect = async () => {
+      await api.delete('/tiktok/disconnect')
+      toast.success('Disconnected')
+      window.location.reload()
+    }
+    return (
+      <div className={cn('rounded-xl border-2 p-4', connected ? 'border-[#fe2c55]/40 bg-[#fe2c55]/5' : 'border-border')}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-black text-white font-bold">T</div>
+            <div>
+              <p className="font-semibold">TikTok Shop</p>
+              <p className={cn('text-xs font-medium', connected ? 'text-green-600' : 'text-muted-foreground')}>
+                {connected ? `✓ Connected — ${tiktokStatus.shopName}` : 'Not connected'}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {connected ? (
+              <>
+                <button onClick={handleSync} disabled={syncing}
+                  className="flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-50">
+                  {syncing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                  {syncing ? 'Syncing...' : 'Sync'}
+                </button>
+                <button onClick={handleDisconnect}
+                  className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50">
+                  Disconnect
+                </button>
+              </>
+            ) : (
+              <button onClick={handleConnect}
+                className="flex items-center gap-2 rounded-lg bg-[#fe2c55] px-4 py-2 text-sm font-semibold text-white hover:bg-[#fe2c55]/90">
+                Connect TikTok Shop
+              </button>
+            )}
+          </div>
+        </div>
+        {connected && tiktokStatus?.lastSyncAt && (
+          <p className="mt-2 text-xs text-muted-foreground border-t pt-2">
+            Last sync: {new Date(tiktokStatus.lastSyncAt).toLocaleString()}
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  // ── Regular credential-based channels ─────────────
   const handleSave = async () => {
     setSaving(true)
     try {
@@ -248,30 +200,20 @@ function ChannelCard({ config, existing, isConnected }: any) {
           {isConnected ? 'Edit' : 'Connect'}
         </button>
       </div>
-
       {expanded && (
         <div className="mt-4 space-y-3 border-t pt-4">
           {config.fields.map((field: string) => (
             <div key={field} className="space-y-1">
               <label className="text-xs font-medium capitalize">{field.replace(/([A-Z])/g, ' $1')}</label>
-              <input
-                type="password"
-                value={values[field] ?? ''}
+              <input type="password" value={values[field] ?? ''}
                 onChange={(e) => setValues({ ...values, [field]: e.target.value })}
                 placeholder={`Enter ${field}`}
                 className="w-full rounded-lg border bg-background px-3 py-2 text-sm font-mono outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
           ))}
-          <p className="text-xs text-muted-foreground">
-            Need API credentials? See the setup guide for{' '}
-            <span className="font-medium">{config.label}</span> in your platform docs.
-          </p>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90 disabled:opacity-50"
-          >
+          <button onClick={handleSave} disabled={saving}
+            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90 disabled:opacity-50">
             {saving ? 'Saving...' : 'Save & Connect'}
           </button>
         </div>
