@@ -4,6 +4,9 @@ import {
   classifyABC,
   autoUpdateReorderPoints,
   getOverstockAnalysis,
+  getExpiryRiskProducts,
+  getLongTermStorageRisk,
+  getUpcomingEventsForOrg,
   forecastDemand,
 } from '../services/inventory-intelligence.service'
 
@@ -42,8 +45,45 @@ export async function inventoryIntelligenceRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: result })
   })
 
+  // GET /inventory/intelligence/expiry — products at expiry risk
+  app.get('/expiry', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const data = await getExpiryRiskProducts(req.user.orgId)
+    return reply.send({ success: true, data })
+  })
+
+  // GET /inventory/intelligence/long-term-storage — FBA long-term storage risk
+  app.get('/long-term-storage', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const data = await getLongTermStorageRisk(req.user.orgId)
+    return reply.send({ success: true, data })
+  })
+
+  // GET /inventory/intelligence/events — upcoming seasonal/festive events
+  app.get('/events', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const data = await getUpcomingEventsForOrg(req.user.orgId)
+    return reply.send({ success: true, data })
+  })
+
+  // PATCH /inventory/intelligence/expiry/:sku — set expiry date on a product
+  app.patch('/expiry/:sku', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const { sku } = req.params as { sku: string }
+    const { expiryDate } = req.body as { expiryDate: string }
+    const product = await import('../lib/db').then(({ prisma }) =>
+      prisma.product.findFirst({ where: { orgId: req.user!.orgId, sku } })
+    )
+    if (!product) return reply.code(404).send({ success: false })
+    const { prisma } = await import('../lib/db')
+    const updated = await prisma.product.update({
+      where: { id: product.id },
+      data: { customFields: { ...(product.customFields as any), expiryDate } },
+    })
+    return reply.send({ success: true, data: updated })
+  })
+
   // GET /inventory/intelligence/forecast/:sku
-  // Demand forecast for a specific SKU
   app.get('/forecast/:sku', async (req, reply) => {
     if (!req.user) return reply.code(401).send({ success: false })
     const { sku } = req.params as { sku: string }

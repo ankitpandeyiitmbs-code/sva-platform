@@ -172,6 +172,7 @@ export async function syncInventory(orgId: string, channel: string) {
       MarketplaceIds: mkt.marketplaceId,
       granularity: 'Marketplace',
       granularityId: mkt.marketplaceId,
+      details: 'true',  // Get full FBA breakdown: inbound, reserved, etc.
     }
     if (nextToken) params.nextToken = nextToken
 
@@ -183,39 +184,58 @@ export async function syncInventory(orgId: string, channel: string) {
       const sku = item.sellerSku
       if (!sku) continue
 
+      // Build detailed FBA snapshot — stored in customFields for the intelligence engine
+      const fbaDetails = {
+        asin: item.asin,
+        source: channel,
+        fulfillableQty:      item.fulfillableQuantity ?? item.totalQuantity ?? 0,
+        inboundWorkingQty:   item.inboundWorkingQuantity  ?? 0,
+        inboundShippedQty:   item.inboundShippedQuantity  ?? 0,
+        inboundReceivingQty: item.inboundReceivingQuantity ?? 0,
+        reservedQty:         item.reservedQuantity?.totalReservedQuantity ?? 0,
+        pendingRemovalQty:   item.pendingRemovalQuantity ?? 0,
+        awdQty:              item.awdQuantity ?? 0,
+        // Track FC arrival date for long-term storage fee calculations
+        receivedAtFcDate: item.earliestCogsDate ?? item.lastUpdatedTime ?? null,
+        lastFbaSync: new Date().toISOString(),
+      }
+
       const existing = await prisma.product.findFirst({ where: { orgId, sku } })
 
       if (!existing) {
         const created = await prisma.product.create({
           data: {
-            orgId,
-            sku,
+            orgId, sku,
             name: item.productName ?? sku,
             isActive: true,
-            customFields: { asin: item.asin, source: channel },
+            customFields: fbaDetails,
           },
         })
         await prisma.inventoryItem.create({
           data: {
-            orgId,
-            productId: created.id,
-            channel,
+            orgId, productId: created.id, channel,
             quantity: item.totalQuantity ?? 0,
+            customFields: fbaDetails,
           },
         })
         totalSynced++
       } else {
-        const invItem = await prisma.inventoryItem.findFirst({
-          where: { productId: existing.id, channel },
+        // Preserve existing product customFields (like expiryDate set manually)
+        const existingCf = (existing.customFields as any) ?? {}
+        await prisma.product.update({
+          where: { id: existing.id },
+          data: { customFields: { ...existingCf, ...fbaDetails, expiryDate: existingCf.expiryDate } },
         })
+
+        const invItem = await prisma.inventoryItem.findFirst({ where: { productId: existing.id, channel } })
         if (invItem) {
           await prisma.inventoryItem.update({
             where: { id: invItem.id },
-            data: { quantity: item.totalQuantity ?? 0, updatedAt: new Date() },
+            data: { quantity: item.totalQuantity ?? 0, updatedAt: new Date(), customFields: fbaDetails },
           })
         } else {
           await prisma.inventoryItem.create({
-            data: { orgId, productId: existing.id, channel, quantity: item.totalQuantity ?? 0 },
+            data: { orgId, productId: existing.id, channel, quantity: item.totalQuantity ?? 0, customFields: fbaDetails },
           })
         }
       }
