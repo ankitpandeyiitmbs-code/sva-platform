@@ -48,7 +48,13 @@ export async function inventoryRoutes(app: FastifyInstance) {
 
   app.get('/suppliers', async (req, reply) => {
     if (!req.user) return reply.code(401).send({ success: false })
-    const suppliers = await prisma.supplier.findMany({ where: { orgId: req.user.orgId } })
+    const suppliers = await prisma.supplier.findMany({ where: { orgId: req.user.orgId }, orderBy: { name: 'asc' } })
     return reply.send({ success: true, data: suppliers })
+  })
+
+  app.post('/suppliers', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const supplier = await prisma.supplier.create({ data: { ...(req.body as any), orgId: req.user.orgId } })
+    return reply.code(201).send({ success: true, data: supplier })
   })
 }
