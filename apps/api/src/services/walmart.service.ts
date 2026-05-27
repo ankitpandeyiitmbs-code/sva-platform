@@ -103,27 +103,32 @@ export async function validateCredentials(clientId: string, clientSecret: string
   }
 }
 
-// ── Fetch all orders for a single ship node (paginated) ──
-async function fetchOrdersForNode(
+// ── Fetch all pages for a given shipNodeType ──────────
+async function fetchByShipNodeType(
   clientId: string,
   clientSecret: string,
   createdStartDate: string,
-  shipNode?: string
+  shipNodeType: 'SellerFulfilled' | 'WalmartFulfilled'
 ): Promise<any[]> {
   const collected: any[] = []
   let nextCursor: string | undefined
 
   do {
-    const params: Record<string, any> = { createdStartDate, limit: 200 }
+    const params: Record<string, any> = { createdStartDate, limit: 200, shipNodeType }
     if (nextCursor) params.nextCursor = nextCursor
-    if (shipNode)   params.shipNode   = shipNode
 
-    const data = await walmartRequest('GET', '/orders', clientId, clientSecret, params)
-    const orders = toArray(data?.list?.elements?.order)
-    const cursor = data?.list?.meta?.nextCursor
+    try {
+      const data = await walmartRequest('GET', '/orders', clientId, clientSecret, params)
+      const orders = toArray(data?.list?.elements?.order)
+      const meta   = data?.list?.meta ?? {}
+      const cursor = meta?.nextCursor
 
-    collected.push(...orders)
-    nextCursor = cursor && typeof cursor === 'string' && cursor.trim() !== '' ? cursor : undefined
+      collected.push(...orders)
+      nextCursor = cursor && typeof cursor === 'string' && cursor.trim() !== '' ? cursor : undefined
+    } catch (err: any) {
+      // WFS might return 404/403 if seller has no WFS — stop gracefully
+      break
+    }
   } while (nextCursor)
 
   return collected
@@ -135,28 +140,17 @@ export async function syncOrders(orgId: string) {
   const { clientId, clientSecret } = creds
   const createdStartDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString()
 
-  // Get all ship nodes so we capture WFS + seller-fulfilled
-  const shipNodes = await getShipNodes(clientId, clientSecret)
-  
-  // Collect from all nodes (or no-filter call if nodes lookup failed)
+  // Fetch BOTH seller-fulfilled AND WFS orders in parallel
+  // Walmart API defaults to SellerFulfilled only — WFS needs explicit shipNodeType=WalmartFulfilled
+  const [sellerFulfilled, wfsFulfilled] = await Promise.allSettled([
+    fetchByShipNodeType(clientId, clientSecret, createdStartDate, 'SellerFulfilled'),
+    fetchByShipNodeType(clientId, clientSecret, createdStartDate, 'WalmartFulfilled'),
+  ])
+
   const allOrdersMap = new Map<string, any>() // dedup by purchaseOrderId
-
-  if (shipNodes.length === 0) {
-    // No ship node filter — get everything
-    const orders = await fetchOrdersForNode(clientId, clientSecret, createdStartDate)
-    for (const o of orders) allOrdersMap.set(o.purchaseOrderId, o)
-  } else {
-    // Fetch per node AND also one call without shipNode to catch anything missed
-    const [noNodeOrders, ...nodeResults] = await Promise.allSettled([
-      fetchOrdersForNode(clientId, clientSecret, createdStartDate), // no shipNode filter
-      ...shipNodes.map(node => fetchOrdersForNode(clientId, clientSecret, createdStartDate, node))
-    ])
-
-    const allBatches = [noNodeOrders, ...nodeResults]
-    for (const result of allBatches) {
-      if (result.status === 'fulfilled') {
-        for (const o of result.value) allOrdersMap.set(o.purchaseOrderId, o)
-      }
+  for (const result of [sellerFulfilled, wfsFulfilled]) {
+    if (result.status === 'fulfilled') {
+      for (const o of result.value) allOrdersMap.set(o.purchaseOrderId, o)
     }
   }
 
