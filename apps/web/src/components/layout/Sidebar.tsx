@@ -1,45 +1,61 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Users, ShoppingCart, Package, Headphones,
   BarChart3, Megaphone, FolderKanban, MessageSquare, Zap,
-  Settings, LogOut, LineChart,
+  Settings, LogOut, LineChart, Store,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { useState } from 'react'
+
+// ── Channel display config ─────────────────────────────
+const CHANNEL_META: Record<string, { label: string; color: string; short: string }> = {
+  WALMART:     { label: 'Walmart',          color: '#007DC6', short: 'W' },
+  AMAZON_US:   { label: 'Amazon US',        color: '#FF9900', short: 'A' },
+  AMAZON_IN:   { label: 'Amazon India',     color: '#FF9900', short: 'A' },
+  AMAZON_AE:   { label: 'Amazon UAE',       color: '#FF9900', short: 'A' },
+  AMAZON_UK:   { label: 'Amazon UK',        color: '#FF9900', short: 'A' },
+  AMAZON_AU:   { label: 'Amazon AU',        color: '#FF9900', short: 'A' },
+  TIKTOK_SHOP: { label: 'TikTok Shop',      color: '#FE2C55', short: 'T' },
+  SHOPIFY:     { label: 'Shopify',          color: '#96BF48', short: 'S' },
+  MYNTRA:      { label: 'Myntra',           color: '#FF3F6C', short: 'M' },
+  FLIPKART:    { label: 'Flipkart',         color: '#2874F0', short: 'F' },
+}
 
 const NAV_SECTIONS = [
   {
     label: 'Main',
     items: [
-      { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', permission: 'dashboard:read' },
-      { href: '/analytics', icon: LineChart, label: 'Analytics', permission: 'dashboard:read' },
-      { href: '/orders', icon: ShoppingCart, label: 'Orders', permission: 'orders:read' },
-      { href: '/inventory', icon: Package, label: 'Inventory', permission: 'inventory:read' },
+      { href: '/dashboard',  icon: LayoutDashboard, label: 'Dashboard',  permission: 'dashboard:read' },
+      { href: '/analytics',  icon: LineChart,       label: 'Analytics',  permission: 'dashboard:read' },
+      { href: '/orders',     icon: ShoppingCart,    label: 'Orders',     permission: 'orders:read'    },
+      { href: '/inventory',  icon: Package,         label: 'Inventory',  permission: 'inventory:read' },
     ],
   },
   {
     label: 'Growth',
     items: [
-      { href: '/crm', icon: Users, label: 'CRM', permission: 'crm:read' },
-      { href: '/marketing', icon: Megaphone, label: 'Marketing', permission: 'marketing:read' },
-      { href: '/support', icon: Headphones, label: 'Support', permission: 'support:read' },
+      { href: '/crm',        icon: Users,     label: 'CRM',       permission: 'crm:read'       },
+      { href: '/marketing',  icon: Megaphone, label: 'Marketing', permission: 'marketing:read'  },
+      { href: '/support',    icon: Headphones,label: 'Support',   permission: 'support:read'    },
     ],
   },
   {
     label: 'Finance',
     items: [
-      { href: '/finance', icon: BarChart3, label: 'Finance', permission: 'finance:read' },
+      { href: '/finance',    icon: BarChart3, label: 'Finance',   permission: 'finance:read'   },
     ],
   },
   {
     label: 'Team',
     items: [
-      { href: '/projects', icon: FolderKanban, label: 'Projects', permission: 'projects:read' },
-      { href: '/chat', icon: MessageSquare, label: 'Chat', permission: 'chat:read' },
-      { href: '/automations', icon: Zap, label: 'Automations', permission: 'automation:read' },
+      { href: '/projects',    icon: FolderKanban,  label: 'Projects',    permission: 'projects:read'   },
+      { href: '/chat',        icon: MessageSquare, label: 'Chat',        permission: 'chat:read'        },
+      { href: '/automations', icon: Zap,           label: 'Automations', permission: 'automation:read'  },
     ],
   },
 ]
@@ -49,8 +65,16 @@ export function Sidebar() {
   const { user, logout } = useAuthStore()
   const [collapsed, setCollapsed] = useState(false)
 
-  // Show all items when no user (no backend connected yet); otherwise filter by permissions
   const userPermissions = user?.permissions ?? NAV_SECTIONS.flatMap(s => s.items.map(i => i.permission))
+
+  // Load connected channels for the Channels section
+  const { data: channels } = useQuery({
+    queryKey: ['channels'],
+    queryFn: () => api.get('/channels').then(r => r.data.data as any[]),
+    staleTime: 30_000,
+  })
+
+  const connectedChannels = (channels ?? []).filter((c: any) => c.status === 'CONNECTED')
 
   return (
     <aside className={cn(
@@ -72,8 +96,9 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-3 px-2">
+        {/* Standard nav sections */}
         {NAV_SECTIONS.map((section) => {
-          const visibleItems = section.items.filter((item) =>
+          const visibleItems = section.items.filter(item =>
             !item.permission || userPermissions.includes(item.permission as any)
           )
           if (!visibleItems.length) return null
@@ -85,11 +110,9 @@ export function Sidebar() {
                 </p>
               )}
               {visibleItems.map((item) => {
-                const active = pathname.startsWith(item.href)
+                const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
                 return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
+                  <Link key={item.href} href={item.href}
                     className={cn(
                       'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                       collapsed && 'justify-center px-2',
@@ -107,12 +130,54 @@ export function Sidebar() {
             </div>
           )
         })}
+
+        {/* ── Connected Channels section ──────────── */}
+        {connectedChannels.length > 0 && (
+          <div className="mb-4">
+            {!collapsed && (
+              <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/40">
+                Channels
+              </p>
+            )}
+            {connectedChannels.map((ch: any) => {
+              const meta = CHANNEL_META[ch.channel]
+              if (!meta) return null
+              const href   = `/channels/${ch.channel}`
+              const active = pathname.startsWith(href)
+              return (
+                <Link key={ch.channel} href={href}
+                  className={cn(
+                    'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                    collapsed && 'justify-center px-2',
+                    active
+                      ? 'bg-sidebar-accent text-white'
+                      : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+                  )}
+                  title={collapsed ? meta.label : undefined}
+                >
+                  {/* Channel colour dot / logo */}
+                  <span
+                    className={cn('flex shrink-0 items-center justify-center rounded-md font-bold text-white',
+                      collapsed ? 'h-5 w-5 text-[10px]' : 'h-4 w-4 text-[9px]'
+                    )}
+                    style={{ backgroundColor: meta.color }}
+                  >
+                    {meta.short}
+                  </span>
+                  {!collapsed && <span className="truncate">{meta.label}</span>}
+                  {!collapsed && (
+                    <span className="ml-auto h-1.5 w-1.5 rounded-full bg-green-500 shrink-0" />
+                  )}
+                </Link>
+              )
+            })}
+          </div>
+        )}
       </nav>
 
       {/* Bottom — User + Settings */}
       <div className="border-t border-sidebar-border p-2">
-        <Link
-          href="/settings"
+        <Link href="/settings"
           className={cn(
             'flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
             collapsed && 'justify-center px-2'
