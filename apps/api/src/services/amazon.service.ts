@@ -130,7 +130,7 @@ export async function syncOrders(orgId: string, channel: string) {
                 zip: o.ShippingAddress.PostalCode,
                 country: o.ShippingAddress.CountryCode,
               }
-            : null,
+            : undefined,
           orderedAt: new Date(o.PurchaseDate),
           items: {
             create: lineItems.map((item: any) => ({
@@ -215,7 +215,6 @@ export async function syncInventory(orgId: string, channel: string) {
           data: {
             orgId, productId: created.id, channel,
             quantity: item.totalQuantity ?? 0,
-            customFields: fbaDetails,
           },
         })
         totalSynced++
@@ -231,11 +230,11 @@ export async function syncInventory(orgId: string, channel: string) {
         if (invItem) {
           await prisma.inventoryItem.update({
             where: { id: invItem.id },
-            data: { quantity: item.totalQuantity ?? 0, updatedAt: new Date(), customFields: fbaDetails },
+            data: { quantity: item.totalQuantity ?? 0, updatedAt: new Date() },
           })
         } else {
           await prisma.inventoryItem.create({
-            data: { orgId, productId: existing.id, channel, quantity: item.totalQuantity ?? 0, customFields: fbaDetails },
+            data: { orgId, productId: existing.id, channel, quantity: item.totalQuantity ?? 0 },
           })
         }
       }

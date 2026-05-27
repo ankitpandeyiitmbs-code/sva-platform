@@ -209,19 +209,18 @@ function calculateTrendedADU(dailySales: number[]): {
 async function getFBAQuantities(orgId: string, sku: string, channel: string) {
   const item = await prisma.inventoryItem.findFirst({
     where: { orgId, channel, product: { sku } },
-    select: { customFields: true, quantity: true },
+    select: { quantity: true },
   })
 
-  const cf = (item?.customFields ?? {}) as any
   return {
-    fulfillableQty:      cf.fulfillableQty      ?? item?.quantity ?? 0,
-    inboundWorkingQty:   cf.inboundWorkingQty   ?? 0,  // In shipment plan, not yet sent
-    inboundShippedQty:   cf.inboundShippedQty   ?? 0,  // Shipped to Amazon, in transit
-    inboundReceivingQty: cf.inboundReceivingQty ?? 0,  // Arrived at FC, being received
-    reservedQty:         cf.reservedQty         ?? 0,  // Reserved for pending orders
-    pendingRemovalQty:   cf.pendingRemovalQty   ?? 0,  // Awaiting removal
-    awdQty:              cf.awdQty              ?? 0,  // Amazon Warehousing & Distribution
-    receivedAtFcDate:    cf.receivedAtFcDate     ?? null,
+    fulfillableQty:      item?.quantity ?? 0,
+    inboundWorkingQty:   0,
+    inboundShippedQty:   0,
+    inboundReceivingQty: 0,
+    reservedQty:         0,
+    pendingRemovalQty:   0,
+    awdQty:              0,
+    receivedAtFcDate:    null,
   }
 }
 
@@ -428,7 +427,7 @@ export async function generateRecommendations(orgId: string, channel?: string) {
   const recommendations = await Promise.all(
     inventoryItems.map((item) =>
       calculateComprehensiveRecommendation(
-        orgId, item.product.sku, item.channel,
+        orgId, item.product.sku, item.channel ?? '',
         item.quantity, item.product.customFields
       ).then((rec) => ({
         ...rec,
