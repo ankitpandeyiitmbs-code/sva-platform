@@ -24,19 +24,30 @@ export async function walmartRoutes(app: FastifyInstance) {
     return reply.send({ success: true, message: 'Credentials valid' })
   })
 
-  // POST /walmart/sync — sync orders + inventory
+  // POST /walmart/sync — kicks off sync in background (fire-and-forget to avoid timeout)
   app.post('/sync', async (req, reply) => {
     if (!req.user) return reply.code(401).send({ success: false })
-    try {
-      const [orders, inventory] = await Promise.all([
-        syncOrders(req.user.orgId),
-        syncInventory(req.user.orgId),
-      ])
-      return reply.send({ success: true, data: { orders, inventory } })
-    } catch (err: any) {
-      app.log.error(err)
-      return reply.code(500).send({ success: false, message: err.message })
-    }
+    const orgId = req.user.orgId
+
+    // Respond immediately so the HTTP request doesn't time out
+    reply.send({ success: true, message: 'Walmart sync started', data: { orders: { synced: 0 }, inventory: { synced: 0 } } })
+
+    // Run sync in background
+    ;(async () => {
+      try {
+        const [orders, inventory] = await Promise.all([
+          syncOrders(orgId),
+          syncInventory(orgId),
+        ])
+        app.log.info(`Walmart sync complete for ${orgId}: ${JSON.stringify({ orders, inventory })}`)
+      } catch (err: any) {
+        app.log.error(`Walmart sync failed for ${orgId}: ${err.message}`)
+        await prisma.channelConfig.updateMany({
+          where: { orgId, channel: 'WALMART' },
+          data: { lastSyncStatus: 'FAILED' },
+        })
+      }
+    })()
   })
 
   // DELETE /walmart/disconnect

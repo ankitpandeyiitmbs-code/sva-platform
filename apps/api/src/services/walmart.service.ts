@@ -5,10 +5,9 @@ import { prisma } from '../lib/db'
 const TOKEN_URL = 'https://marketplace.walmartapis.com/v3/token'
 const BASE_URL  = 'https://marketplace.walmartapis.com/v3'
 
-// ── In-memory token cache (per clientId) ──────────────────
+// ── Token cache ───────────────────────────────────────
 const tokenCache = new Map<string, { token: string; expiresAt: number }>()
 
-// ── Auth: get/refresh access token ───────────────────────
 async function getAccessToken(clientId: string, clientSecret: string): Promise<string> {
   const cached = tokenCache.get(clientId)
   if (cached && Date.now() < cached.expiresAt - 60_000) return cached.token
@@ -30,14 +29,11 @@ async function getAccessToken(clientId: string, clientSecret: string): Promise<s
   )
 
   const { access_token, expires_in } = res.data
-  tokenCache.set(clientId, {
-    token: access_token,
-    expiresAt: Date.now() + (expires_in ?? 900) * 1000,
-  })
+  tokenCache.set(clientId, { token: access_token, expiresAt: Date.now() + (expires_in ?? 900) * 1000 })
   return access_token
 }
 
-// ── Authenticated request helper ──────────────────────────
+// ── Authenticated request ──────────────────────────────
 async function walmartRequest(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
@@ -60,12 +56,33 @@ async function walmartRequest(
     },
     params,
     data: body,
-    timeout: 20000,
+    timeout: 30000,
   })
   return res.data
 }
 
-// ── Get credentials from DB ───────────────────────────────
+// ── Normalise orderLine: Walmart returns object when 1 line, array when many ──
+function toArray<T>(val: T | T[] | undefined | null): T[] {
+  if (!val) return []
+  return Array.isArray(val) ? val : [val]
+}
+
+// ── Get all ship nodes (seller-fulfilled + WFS) ────────
+async function getShipNodes(clientId: string, clientSecret: string): Promise<string[]> {
+  try {
+    const data = await walmartRequest('GET', '/settings/shipping/nodes', clientId, clientSecret)
+    const nodes = toArray(data?.list?.member ?? data?.shipNode ?? data)
+    const nodeIds = nodes
+      .map((n: any) => n.shipNodeId ?? n.id ?? n.shipNode)
+      .filter(Boolean)
+    return nodeIds.length > 0 ? nodeIds : ['SELLER_FULFILLED']
+  } catch {
+    // If ship nodes API fails, return sentinel meaning "no filter" (all nodes)
+    return []
+  }
+}
+
+// ── Get credentials ────────────────────────────────────
 async function getChannelCreds(orgId: string) {
   const config = await prisma.channelConfig.findFirst({
     where: { orgId, channel: 'WALMART', status: 'CONNECTED' },
@@ -76,7 +93,7 @@ async function getChannelCreds(orgId: string) {
   return { config, creds: creds as { clientId: string; clientSecret: string } }
 }
 
-// ── Validate credentials (called before saving) ───────────
+// ── Validate credentials ───────────────────────────────
 export async function validateCredentials(clientId: string, clientSecret: string): Promise<boolean> {
   try {
     await getAccessToken(clientId, clientSecret)
@@ -86,94 +103,142 @@ export async function validateCredentials(clientId: string, clientSecret: string
   }
 }
 
-// ── Sync orders (last 30 days) ────────────────────────────
-export async function syncOrders(orgId: string) {
-  const { config, creds } = await getChannelCreds(orgId)
-  const { clientId, clientSecret } = creds
-
-  const createdStartDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString()
+// ── Fetch all orders for a single ship node (paginated) ──
+async function fetchOrdersForNode(
+  clientId: string,
+  clientSecret: string,
+  createdStartDate: string,
+  shipNode?: string
+): Promise<any[]> {
+  const collected: any[] = []
   let nextCursor: string | undefined
-  let totalSynced = 0
 
   do {
     const params: Record<string, any> = { createdStartDate, limit: 200 }
     if (nextCursor) params.nextCursor = nextCursor
+    if (shipNode)   params.shipNode   = shipNode
 
     const data = await walmartRequest('GET', '/orders', clientId, clientSecret, params)
-    const orders = data?.list?.elements?.order ?? []
-    nextCursor = data?.list?.meta?.nextCursor
+    const orders = toArray(data?.list?.elements?.order)
+    const cursor = data?.list?.meta?.nextCursor
 
-    for (const o of orders) {
-      const channelOrderId = o.purchaseOrderId
-      const existing = await prisma.order.findFirst({ where: { orgId, channelOrderId } })
-      if (existing) continue
-
-      const lineItems = o.orderLines?.orderLine ?? []
-      const total = lineItems.reduce((sum: number, line: any) => {
-        return sum + parseFloat(line.charges?.charge?.[0]?.chargeAmount?.amount ?? '0')
-      }, 0)
-
-      const postalAddr = o.shippingInfo?.postalAddress
-      const shippingAddress = postalAddr
-        ? {
-            name:    postalAddr.name,
-            line1:   postalAddr.address1,
-            line2:   postalAddr.address2 ?? '',
-            city:    postalAddr.city,
-            state:   postalAddr.state,
-            zip:     postalAddr.postalCode,
-            country: postalAddr.country,
-          }
-        : undefined
-
-      await prisma.order.create({
-        data: {
-          orgId,
-          orderNumber: `WMT-${channelOrderId.slice(-8)}`,
-          channel: 'WALMART',
-          channelOrderId,
-          status: mapOrderStatus(
-            o.orderLines?.orderLine?.[0]?.orderLineStatuses?.orderLineStatus?.[0]?.status ?? 'Created'
-          ),
-          fulfillmentStatus: mapFulfillmentStatus(
-            o.orderLines?.orderLine?.[0]?.orderLineStatuses?.orderLineStatus?.[0]?.status ?? 'Created'
-          ),
-          paymentStatus: 'PAID',
-          currency: 'USD',
-          subtotal: total,
-          tax: 0,
-          shipping: 0,
-          total,
-          cogs: 0,
-          shippingAddress,
-          orderedAt: new Date(o.orderDate),
-          items: {
-            create: lineItems.map((line: any) => ({
-              sku:       line.item?.sku ?? line.productInfo?.sku ?? 'UNKNOWN',
-              name:      line.item?.productName ?? 'Walmart Product',
-              quantity:  parseInt(line.orderLineQuantity?.amount ?? '1', 10),
-              unitPrice:
-                parseFloat(line.charges?.charge?.[0]?.chargeAmount?.amount ?? '0') /
-                Math.max(1, parseInt(line.orderLineQuantity?.amount ?? '1', 10)),
-              unitCost: 0,
-              total: parseFloat(line.charges?.charge?.[0]?.chargeAmount?.amount ?? '0'),
-            })),
-          },
-        },
-      })
-      totalSynced++
-    }
+    collected.push(...orders)
+    nextCursor = cursor && typeof cursor === 'string' && cursor.trim() !== '' ? cursor : undefined
   } while (nextCursor)
+
+  return collected
+}
+
+// ── Sync orders (all ship nodes, 180 days) ─────────────
+export async function syncOrders(orgId: string) {
+  const { config, creds } = await getChannelCreds(orgId)
+  const { clientId, clientSecret } = creds
+  const createdStartDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString()
+
+  // Get all ship nodes so we capture WFS + seller-fulfilled
+  const shipNodes = await getShipNodes(clientId, clientSecret)
+  
+  // Collect from all nodes (or no-filter call if nodes lookup failed)
+  const allOrdersMap = new Map<string, any>() // dedup by purchaseOrderId
+
+  if (shipNodes.length === 0) {
+    // No ship node filter — get everything
+    const orders = await fetchOrdersForNode(clientId, clientSecret, createdStartDate)
+    for (const o of orders) allOrdersMap.set(o.purchaseOrderId, o)
+  } else {
+    // Fetch per node AND also one call without shipNode to catch anything missed
+    const [noNodeOrders, ...nodeResults] = await Promise.allSettled([
+      fetchOrdersForNode(clientId, clientSecret, createdStartDate), // no shipNode filter
+      ...shipNodes.map(node => fetchOrdersForNode(clientId, clientSecret, createdStartDate, node))
+    ])
+
+    const allBatches = [noNodeOrders, ...nodeResults]
+    for (const result of allBatches) {
+      if (result.status === 'fulfilled') {
+        for (const o of result.value) allOrdersMap.set(o.purchaseOrderId, o)
+      }
+    }
+  }
+
+  const allOrders = Array.from(allOrdersMap.values())
+  let totalSynced = 0
+
+  for (const o of allOrders) {
+    const channelOrderId = o.purchaseOrderId
+    const existing = await prisma.order.findFirst({ where: { orgId, channelOrderId } })
+    if (existing) continue
+
+    // Normalise line items (object OR array)
+    const lineItems = toArray(o.orderLines?.orderLine)
+    
+    // Sum all PRODUCT charges across all lines
+    const total = lineItems.reduce((sum: number, line: any) => {
+      const charges = toArray(line.charges?.charge)
+      const productCharge = charges.find((c: any) => c.chargeType === 'PRODUCT' || c.chargeName === 'ItemPrice')
+                          ?? charges[0]
+      const unitPrice = parseFloat(productCharge?.chargeAmount?.amount ?? '0')
+      const qty       = parseInt(line.orderLineQuantity?.amount ?? '1', 10)
+      return sum + unitPrice * qty
+    }, 0)
+
+    const postalAddr   = o.shippingInfo?.postalAddress
+    const shippingAddress = postalAddr
+      ? { name: postalAddr.name, line1: postalAddr.address1, line2: postalAddr.address2 ?? '',
+          city: postalAddr.city, state: postalAddr.stateOrProvince ?? postalAddr.state,
+          zip: postalAddr.postalCode, country: postalAddr.country }
+      : undefined
+
+    const firstLineStatus = toArray(o.orderLines?.orderLine)[0]?.orderLineStatuses?.orderLineStatus
+    const topStatus = toArray(firstLineStatus)[0]?.status ?? 'Created'
+
+    await prisma.order.create({
+      data: {
+        orgId,
+        orderNumber:       `WMT-${channelOrderId.slice(-8)}`,
+        channel:           'WALMART',
+        channelOrderId,
+        status:            mapOrderStatus(topStatus),
+        fulfillmentStatus: mapFulfillmentStatus(topStatus),
+        paymentStatus:     'PAID',
+        currency:          'USD',
+        subtotal:          total,
+        tax:               0,
+        shipping:          0,
+        total,
+        cogs:              0,
+        shippingAddress,
+        orderedAt:         new Date(typeof o.orderDate === 'number' ? o.orderDate : parseInt(o.orderDate)),
+        items: {
+          create: lineItems.map((line: any) => {
+            const charges = toArray(line.charges?.charge)
+            const productCharge = charges.find((c: any) => c.chargeType === 'PRODUCT' || c.chargeName === 'ItemPrice')
+                                ?? charges[0]
+            const unitPrice = parseFloat(productCharge?.chargeAmount?.amount ?? '0')
+            const qty       = parseInt(line.orderLineQuantity?.amount ?? '1', 10)
+            return {
+              sku:       line.item?.sku ?? 'UNKNOWN',
+              name:      line.item?.productName ?? 'Walmart Product',
+              quantity:  qty,
+              unitPrice,
+              unitCost:  0,
+              total:     unitPrice * qty,
+            }
+          }),
+        },
+      },
+    })
+    totalSynced++
+  }
 
   await prisma.channelConfig.update({
     where: { id: config.id },
-    data: { lastSyncAt: new Date(), lastSyncStatus: 'SUCCESS' },
+    data:  { lastSyncAt: new Date(), lastSyncStatus: 'SUCCESS' },
   })
 
-  return { synced: totalSynced }
+  return { synced: totalSynced, totalFromWalmart: allOrders.length }
 }
 
-// ── Sync inventory / items ────────────────────────────────
+// ── Sync inventory ─────────────────────────────────────
 export async function syncInventory(orgId: string) {
   const { creds } = await getChannelCreds(orgId)
   const { clientId, clientSecret } = creds
@@ -186,53 +251,29 @@ export async function syncInventory(orgId: string) {
     if (nextCursor) params.nextCursor = nextCursor
 
     const data = await walmartRequest('GET', '/items', clientId, clientSecret, params)
-    const items = data?.ItemResponse ?? []
-    nextCursor = data?.nextCursor
+    const items = toArray(data?.ItemResponse)
+    const cursor = data?.nextCursor
+    nextCursor = cursor && typeof cursor === 'string' && cursor.trim() !== '' ? cursor : undefined
 
     for (const item of items) {
       const sku = item.sku
       if (!sku) continue
 
-      // Fetch inventory level for this SKU
       let quantity = 0
       try {
         const inv = await walmartRequest('GET', '/inventory', clientId, clientSecret, { sku })
-        quantity = parseInt(inv?.quantity?.amount ?? '0', 10)
-      } catch { /* skip if inventory call fails for individual SKU */ }
+        quantity   = parseInt(inv?.quantity?.amount ?? '0', 10)
+      } catch { /* skip individual SKU failure */ }
 
       const existing = await prisma.product.findFirst({ where: { orgId, sku } })
 
       if (!existing) {
         const created = await prisma.product.create({
           data: {
-            orgId,
-            sku,
+            orgId, sku,
             name:     item.productName ?? sku,
             isActive: item.lifecycleStatus === 'ACTIVE',
             customFields: {
-              walmartItemId:    item.wpid,
-              publishStatus:    item.publishedStatus,
-              source:           'WALMART',
-              lastWalmartSync:  new Date().toISOString(),
-            },
-          },
-        })
-        await prisma.inventoryItem.create({
-          data: {
-            orgId,
-            productId: created.id,
-            channel:   'WALMART',
-            quantity,
-          },
-        })
-        totalSynced++
-      } else {
-        const existingCf = (existing.customFields as any) ?? {}
-        await prisma.product.update({
-          where: { id: existing.id },
-          data: {
-            customFields: {
-              ...existingCf,
               walmartItemId:   item.wpid,
               publishStatus:   item.publishedStatus,
               source:          'WALMART',
@@ -240,19 +281,30 @@ export async function syncInventory(orgId: string) {
             },
           },
         })
-
+        await prisma.inventoryItem.create({
+          data: { orgId, productId: created.id, channel: 'WALMART', quantity },
+        })
+        totalSynced++
+      } else {
+        await prisma.product.update({
+          where: { id: existing.id },
+          data: {
+            customFields: {
+              ...((existing.customFields as any) ?? {}),
+              walmartItemId:   item.wpid,
+              publishStatus:   item.publishedStatus,
+              source:          'WALMART',
+              lastWalmartSync: new Date().toISOString(),
+            },
+          },
+        })
         const invItem = await prisma.inventoryItem.findFirst({
           where: { productId: existing.id, channel: 'WALMART' },
         })
         if (invItem) {
-          await prisma.inventoryItem.update({
-            where: { id: invItem.id },
-            data: { quantity, updatedAt: new Date() },
-          })
+          await prisma.inventoryItem.update({ where: { id: invItem.id }, data: { quantity, updatedAt: new Date() } })
         } else {
-          await prisma.inventoryItem.create({
-            data: { orgId, productId: existing.id, channel: 'WALMART', quantity },
-          })
+          await prisma.inventoryItem.create({ data: { orgId, productId: existing.id, channel: 'WALMART', quantity } })
         }
       }
     }
@@ -261,41 +313,28 @@ export async function syncInventory(orgId: string) {
   return { synced: totalSynced }
 }
 
-// ── Get connection status ─────────────────────────────────
+// ── Get status ─────────────────────────────────────────
 export async function getStatus(orgId: string) {
   return prisma.channelConfig.findFirst({
-    where: { orgId, channel: 'WALMART' },
-    select: {
-      status: true,
-      displayName: true,
-      lastSyncAt: true,
-      lastSyncStatus: true,
-    },
+    where:  { orgId, channel: 'WALMART' },
+    select: { status: true, displayName: true, lastSyncAt: true, lastSyncStatus: true },
   })
 }
 
-// ── Status mappers ────────────────────────────────────────
+// ── Status mappers ─────────────────────────────────────
 function mapOrderStatus(status: string): string {
   const map: Record<string, string> = {
-    Created:              'PENDING',
-    Acknowledged:         'PROCESSING',
-    Shipped:              'SHIPPED',
-    Delivered:            'DELIVERED',
-    Cancelled:            'CANCELLED',
-    Refund:               'COMPLETED',
-    'Partially Shipped':  'PROCESSING',
+    Created: 'PENDING', Acknowledged: 'PROCESSING', Shipped: 'SHIPPED',
+    Delivered: 'DELIVERED', Cancelled: 'CANCELLED', Refund: 'COMPLETED',
+    'Partially Shipped': 'PROCESSING',
   }
   return map[status] ?? 'PENDING'
 }
 
 function mapFulfillmentStatus(status: string): string {
   const map: Record<string, string> = {
-    Created:              'UNFULFILLED',
-    Acknowledged:         'UNFULFILLED',
-    Shipped:              'FULFILLED',
-    'Partially Shipped':  'PARTIAL',
-    Delivered:            'FULFILLED',
-    Cancelled:            'UNFULFILLED',
+    Created: 'UNFULFILLED', Acknowledged: 'UNFULFILLED', Shipped: 'FULFILLED',
+    'Partially Shipped': 'PARTIAL', Delivered: 'FULFILLED', Cancelled: 'UNFULFILLED',
   }
   return map[status] ?? 'UNFULFILLED'
 }
