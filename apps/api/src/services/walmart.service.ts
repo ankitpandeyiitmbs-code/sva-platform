@@ -91,7 +91,7 @@ export async function syncOrders(orgId: string) {
   const { config, creds } = await getChannelCreds(orgId)
   const { clientId, clientSecret } = creds
 
-  const createdStartDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  const createdStartDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString()
   let nextCursor: string | undefined
   let totalSynced = 0
 

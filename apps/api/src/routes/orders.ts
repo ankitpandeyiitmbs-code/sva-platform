@@ -45,4 +45,81 @@ export async function orderRoutes(app: FastifyInstance) {
     const order = await prisma.order.update({ where: { id }, data: req.body as any })
     return reply.send({ success: true, data: order })
   })
+
+  // GET /orders/stats — server-side aggregated stats with proper date filter
+  app.get('/stats', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const { channel, days = '30' } = req.query as any
+    const orgId = req.user.orgId
+    const since = new Date(Date.now() - parseInt(days) * 24 * 60 * 60 * 1000)
+
+    const where: any = { orgId, orderedAt: { gte: since } }
+    if (channel) where.channel = channel
+
+    const [agg, orders, allTime] = await Promise.all([
+      prisma.order.aggregate({
+        where,
+        _sum: { total: true },
+        _count: { id: true },
+        _avg: { total: true },
+      }),
+      prisma.order.findMany({
+        where,
+        select: { orderedAt: true, total: true, status: true },
+        orderBy: { orderedAt: 'asc' },
+      }),
+      prisma.order.aggregate({
+        where: { orgId, ...(channel ? { channel } : {}) },
+        _sum: { total: true },
+        _count: { id: true },
+      }),
+    ])
+
+    const pending = orders.filter(o => ['PENDING','PROCESSING'].includes(o.status)).length
+
+    const byDay: Record<string, number> = {}
+    for (const o of orders) {
+      const day = o.orderedAt.toISOString().slice(0, 10)
+      byDay[day] = (byDay[day] ?? 0) + Number(o.total ?? 0)
+    }
+    const chart = Object.entries(byDay)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, total]) => ({ date, total }))
+
+    const items = await prisma.orderItem.findMany({
+      where: { order: where },
+      select: { sku: true, name: true, quantity: true, total: true },
+    })
+    const skuMap: Record<string, { name: string; qty: number; revenue: number }> = {}
+    for (const item of items) {
+      if (!skuMap[item.sku]) skuMap[item.sku] = { name: item.name, qty: 0, revenue: 0 }
+      skuMap[item.sku].qty     += item.quantity
+      skuMap[item.sku].revenue += Number(item.total ?? 0)
+    }
+    const topSkus = Object.entries(skuMap)
+      .sort(([, a], [, b]) => b.revenue - a.revenue)
+      .slice(0, 8)
+      .map(([sku, v]) => ({ sku, ...v }))
+
+    return reply.send({
+      success: true,
+      data: {
+        period:     parseInt(days),
+        revenue:    Number(agg._sum.total ?? 0),
+        orderCount: agg._count.id,
+        aov:        Number(agg._avg.total ?? 0),
+        pending,
+        chart,
+        topSkus,
+        allTime: {
+          revenue:    Number(allTime._sum.total ?? 0),
+          orderCount: allTime._count.id,
+        },
+      },
+    })
+  })
 }
+
+// ── Stats endpoint ─────────────────────────────────────────────
+// GET /orders/stats?channel=WALMART&days=30
+// Returns accurate server-side computed stats with proper date filtering
