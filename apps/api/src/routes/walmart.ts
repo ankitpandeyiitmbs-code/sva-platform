@@ -48,4 +48,52 @@ export async function walmartRoutes(app: FastifyInstance) {
     })
     return reply.send({ success: true, message: 'Walmart disconnected' })
   })
+  // GET /walmart/diagnose — check raw Walmart API response without saving anything
+  app.get('/diagnose', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const c = await prisma.channelConfig.findFirst({
+      where: { orgId: req.user.orgId, channel: 'WALMART', status: 'CONNECTED' },
+    })
+    if (!c) return reply.code(400).send({ success: false, message: 'Walmart not connected' })
+    const creds = c.credentials as any
+
+    const axios = (await import('axios')).default
+    const { randomUUID } = await import('crypto')
+
+    const credentials = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString('base64')
+    const tokenRes = await axios.post(
+      'https://marketplace.walmartapis.com/v3/token',
+      new URLSearchParams({ grant_type: 'client_credentials' }),
+      { headers: { Authorization: `Basic ${credentials}`, 'WM_SVC.NAME': 'SVA Platform', 'WM_QOS.CORRELATION_ID': randomUUID(), 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, timeout: 10000 }
+    )
+    const token = tokenRes.data.access_token
+    const createdStartDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+
+    const ordersRes = await axios.get('https://marketplace.walmartapis.com/v3/orders', {
+      headers: { 'WM_SEC.ACCESS_TOKEN': token, 'WM_SVC.NAME': 'SVA Platform', 'WM_QOS.CORRELATION_ID': randomUUID(), 'WM_CONSUMER.CHANNEL.TYPE': '0f3e4dd4-0514-4346-b39d-af0e00ea066d', Accept: 'application/json' },
+      params: { createdStartDate, limit: 200 },
+      timeout: 20000,
+    })
+
+    const raw = ordersRes.data
+    const meta = raw?.list?.meta ?? {}
+    const orders = raw?.list?.elements?.order ?? []
+    const dbCount = await prisma.order.count({ where: { orgId: req.user.orgId, channel: 'WALMART' } })
+
+    return reply.send({
+      success: true,
+      data: {
+        walmartMeta:      meta,
+        walmartPageCount: orders.length,
+        hasNextCursor:    !!meta.nextCursor,
+        nextCursorValue:  meta.nextCursor ?? null,
+        totalCountField:  meta.totalCount ?? null,
+        createdStartDate,
+        firstOrderDate: orders[0]?.orderDate ?? null,
+        lastOrderDate:  orders[orders.length - 1]?.orderDate ?? null,
+        dbOrderCount:   dbCount,
+      },
+    })
+  })
+
 }
