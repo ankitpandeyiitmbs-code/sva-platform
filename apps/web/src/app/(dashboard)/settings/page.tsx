@@ -175,15 +175,24 @@ function ChannelCard({ config, existing, isConnected, tiktokStatus }: any) {
 
   // ── Regular credential-based channels ─────────────
   const isAmazon = config.key.startsWith('AMAZON_')
+  const isWalmart = config.key === 'WALMART'
 
   const handleSave = async () => {
     setSaving(true)
     try {
+      if (isWalmart) {
+        const { data: validation } = await api.post('/walmart/validate', values)
+        if (!validation.success) {
+          toast.error(validation.message ?? 'Invalid credentials')
+          setSaving(false)
+          return
+        }
+      }
       await api.put(`/channels/${config.key}`, { credentials: values, displayName: config.label })
       toast.success(`${config.label} connected successfully`)
       setExpanded(false)
-    } catch {
-      toast.error('Failed to save credentials')
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message ?? 'Failed to save credentials')
     } finally {
       setSaving(false)
     }
@@ -194,6 +203,9 @@ function ChannelCard({ config, existing, isConnected, tiktokStatus }: any) {
     try {
       if (isAmazon) {
         const { data } = await api.post(`/amazon/${config.key}/sync`)
+        toast.success(`Synced ${data.data.orders.synced} orders & ${data.data.inventory.synced} products`)
+      } else if (isWalmart) {
+        const { data } = await api.post('/walmart/sync')
         toast.success(`Synced ${data.data.orders.synced} orders & ${data.data.inventory.synced} products`)
       } else {
         await api.post(`/channels/${config.key}/sync`)
@@ -250,6 +262,15 @@ function ChannelCard({ config, existing, isConnected, tiktokStatus }: any) {
             <p className="text-xs text-muted-foreground rounded-lg bg-muted/50 p-3">
               Get credentials from <strong>Amazon Seller Central → Apps & Services → Develop Apps</strong>.
               You need: Client ID, Client Secret, and Refresh Token from your SP-API app.
+            </p>
+          )}
+          {isWalmart && (
+            <p className="text-xs text-muted-foreground rounded-lg bg-muted/50 p-3">
+              Get credentials from{' '}
+              <a href="https://developer.walmart.com" target="_blank" className="underline font-medium">
+                developer.walmart.com
+              </a>{' '}
+              → My Applications → Create New App. You need: <strong>Client ID</strong> and <strong>Client Secret</strong>.
             </p>
           )}
           <button onClick={handleSave} disabled={saving}
