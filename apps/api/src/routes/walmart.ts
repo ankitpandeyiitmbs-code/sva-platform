@@ -152,4 +152,91 @@ export async function walmartRoutes(app: FastifyInstance) {
     })
   })
 
+  // GET /walmart/deep-diagnose — test all orderStatuses combos
+  app.get('/deep-diagnose', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const c = await prisma.channelConfig.findFirst({
+      where: { orgId: req.user.orgId, channel: 'WALMART', status: 'CONNECTED' },
+    })
+    if (!c) return reply.code(400).send({ success: false })
+    const creds = c.credentials as any
+    const axios = (await import('axios')).default
+    const { randomUUID } = await import('crypto')
+
+    const credentials = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString('base64')
+    const tokenRes = await axios.post(
+      'https://marketplace.walmartapis.com/v3/token',
+      new URLSearchParams({ grant_type: 'client_credentials' }),
+      { headers: { Authorization: `Basic ${credentials}`, 'WM_SVC.NAME': 'SVA', 'WM_QOS.CORRELATION_ID': randomUUID(), 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, timeout: 10000 }
+    )
+    const token = tokenRes.data.access_token
+    const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+
+    const headers = {
+      'WM_SEC.ACCESS_TOKEN': token, 'WM_SVC.NAME': 'SVA',
+      'WM_QOS.CORRELATION_ID': randomUUID(),
+      'WM_CONSUMER.CHANNEL.TYPE': '0f3e4dd4-0514-4346-b39d-af0e00ea066d',
+      Accept: 'application/json',
+    }
+
+    // Test different status combos
+    const tests = [
+      { label: 'default (no status)', params: { createdStartDate: since30, limit: 1 } },
+      { label: 'Acknowledged',        params: { createdStartDate: since30, limit: 1, orderStatuses: 'Acknowledged' } },
+      { label: 'Shipped',             params: { createdStartDate: since30, limit: 1, orderStatuses: 'Shipped' } },
+      { label: 'Created',             params: { createdStartDate: since30, limit: 1, orderStatuses: 'Created' } },
+      { label: 'Delivered',           params: { createdStartDate: since30, limit: 1, orderStatuses: 'Delivered' } },
+      { label: 'Cancelled',           params: { createdStartDate: since30, limit: 1, orderStatuses: 'Cancelled' } },
+      { label: 'all combined',        params: { createdStartDate: since30, limit: 1, orderStatuses: 'Created,Acknowledged,Shipped,Delivered,Cancelled' } },
+    ]
+
+    const results: any[] = []
+    for (const test of tests) {
+      try {
+        const r = await axios.get('https://marketplace.walmartapis.com/v3/orders', {
+          headers: { ...headers, 'WM_QOS.CORRELATION_ID': randomUUID() },
+          params: test.params,
+          timeout: 15000,
+        })
+        results.push({
+          label: test.label,
+          totalCount: r.data?.list?.meta?.totalCount,
+          nextCursor:  !!r.data?.list?.meta?.nextCursor,
+          returned:    (r.data?.list?.elements?.order ?? []).length,
+        })
+      } catch (e: any) {
+        results.push({ label: test.label, error: e.message })
+      }
+    }
+
+    // Also check a sample order's full line structure
+    const sampleRes = await axios.get('https://marketplace.walmartapis.com/v3/orders', {
+      headers: { ...headers, 'WM_QOS.CORRELATION_ID': randomUUID() },
+      params: { createdStartDate: since30, limit: 3 },
+      timeout: 15000,
+    })
+    const sampleOrders = sampleRes.data?.list?.elements?.order ?? []
+    const lineStructure = sampleOrders.map((o: any) => {
+      const lines = o.orderLines?.orderLine
+      const isArray = Array.isArray(lines)
+      const lineArr = isArray ? lines : (lines ? [lines] : [])
+      return {
+        purchaseOrderId: o.purchaseOrderId,
+        orderDate: o.orderDate,
+        linesIsArray: isArray,
+        lineCount: lineArr.length,
+        lines: lineArr.map((l: any) => ({
+          lineNumber: l.lineNumber,
+          sku: l.item?.sku,
+          qty: l.orderLineQuantity?.amount,
+          chargeAmount: l.charges?.charge?.[0]?.chargeAmount?.amount,
+          chargeType:   l.charges?.charge?.[0]?.chargeType,
+          allCharges:   l.charges?.charge?.length,
+        }))
+      }
+    })
+
+    return reply.send({ success: true, data: { statusTests: results, lineStructure } })
+  })
+
 }
