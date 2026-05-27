@@ -488,10 +488,10 @@ export default function InventoryIntelligencePage() {
                       <td className="px-4 py-3">
                         {editExpiry?.sku === item.sku ? (
                           <div className="flex items-center gap-1">
-                            <input type="date" value={editExpiry.value}
+                            <input type="date" value={editExpiry!.value}
                               onChange={e => setEditExpiry({ sku: item.sku, value: e.target.value })}
                               className="rounded border bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-primary w-32" />
-                            <button onClick={() => saveExpiry({ sku: item.sku, expiryDate: editExpiry.value })}
+                            <button onClick={() => saveExpiry({ sku: item.sku, expiryDate: editExpiry!.value })}
                               disabled={savingExpiry} className="rounded bg-primary px-2 py-1 text-xs text-white disabled:opacity-50">
                               {savingExpiry ? '...' : 'Save'}
                             </button>

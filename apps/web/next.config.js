@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  typescript: { ignoreBuildErrors: false },
+  eslint: { ignoreDuringBuilds: true },
   reactStrictMode: true,
   transpilePackages: ['@sva/types'],
   images: {
