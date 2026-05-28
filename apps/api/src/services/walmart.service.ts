@@ -316,6 +316,37 @@ export async function syncOrders(orgId: string) {
   return { synced: newOrders.length, totalFromWalmart: allOrders.length }
 }
 
+// ── Get inventory quantity: seller-managed + WFS combined ──
+async function getInventoryQuantity(
+  clientId: string,
+  clientSecret: string,
+  sku: string
+): Promise<number> {
+  // 1. Seller-managed inventory (seller-fulfilled items)
+  let sellerQty = 0
+  try {
+    const inv = await walmartRequest('GET', '/inventory', clientId, clientSecret, { sku })
+    sellerQty = parseInt(inv?.quantity?.amount ?? '0', 10)
+  } catch { /* not seller-fulfilled */ }
+
+  // 2. WFS (Walmart Fulfillment Services) inventory
+  // GET /v3/fulfillment/inventory returns qty stored in Walmart warehouses
+  let wfsQty = 0
+  try {
+    const wfsInv = await walmartRequest('GET', '/fulfillment/inventory', clientId, clientSecret, { sku })
+    // WFS response structure: payload.available.amount OR quantity.amount
+    wfsQty = parseInt(
+      wfsInv?.payload?.available?.amount ??
+      wfsInv?.available?.amount ??
+      wfsInv?.quantity?.amount ??
+      '0', 10
+    )
+  } catch { /* not a WFS item or endpoint unavailable */ }
+
+  // Return combined: seller stock + WFS stock
+  return sellerQty + wfsQty
+}
+
 // ── Sync inventory ─────────────────────────────────────
 export async function syncInventory(orgId: string) {
   const { creds } = await getChannelCreds(orgId)
@@ -337,21 +368,26 @@ export async function syncInventory(orgId: string) {
       const sku = item.sku
       if (!sku) continue
 
-      let quantity = 0
-      try {
-        const inv = await walmartRequest('GET', '/inventory', clientId, clientSecret, { sku })
-        quantity   = parseInt(inv?.quantity?.amount ?? '0', 10)
-      } catch { /* skip */ }
+      // Get total quantity = seller-managed + WFS
+      const quantity = await getInventoryQuantity(clientId, clientSecret, sku)
 
       const existing = await prisma.product.findFirst({ where: { orgId, sku } })
       const meta = {
-        walmartItemId: item.wpid, publishStatus: item.publishedStatus,
-        source: 'WALMART', lastWalmartSync: new Date().toISOString(),
+        walmartItemId:    item.wpid,
+        publishStatus:    item.publishedStatus,
+        fulfillmentType:  item.fulfillmentType ?? 'UNKNOWN',
+        source:           'WALMART',
+        lastWalmartSync:  new Date().toISOString(),
       }
 
       if (!existing) {
         const created = await prisma.product.create({
-          data: { orgId, sku, name: item.productName ?? sku, isActive: item.lifecycleStatus === 'ACTIVE', customFields: meta },
+          data: {
+            orgId, sku,
+            name:     item.productName ?? sku,
+            isActive: item.lifecycleStatus === 'ACTIVE',
+            customFields: meta,
+          },
         })
         await prisma.inventoryItem.create({ data: { orgId, productId: created.id, channel: 'WALMART', quantity } })
         totalSynced++
