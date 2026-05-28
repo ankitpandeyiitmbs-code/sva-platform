@@ -97,9 +97,26 @@ async function fetchAllOrders(
       const data = await walmartRequest('GET', '/orders', clientId, clientSecret, params)
       const orders = toArray(data?.list?.elements?.order)
       const cursor  = data?.list?.meta?.nextCursor
-      console.log(`[fetchAllOrders] page ${page} got ${orders.length} orders, hasMore=${!!cursor}`)
+      const total   = data?.list?.meta?.totalCount
+      console.log(`[fetchAllOrders] page ${page} got ${orders.length} orders, total=${total}, hasMore=${!!cursor}`)
       collected.push(...orders)
-      nextCursor = cursor && typeof cursor === 'string' && cursor.trim() !== '' ? cursor : undefined
+
+      // Stop if: no cursor, cursor says hasMoreElements=false, or got fewer than limit (last page)
+      const isLastPage = !cursor ||
+        (typeof cursor === 'string' && (
+          cursor.trim() === '' ||
+          cursor.includes('hasMoreElements=false') ||
+          cursor.includes('hasMoreElements%3Dfalse')
+        )) ||
+        orders.length < 200
+
+      nextCursor = isLastPage ? undefined : (cursor as string)
+
+      // Safety: never exceed total count reported by API
+      if (total && collected.length >= total) {
+        console.log(`[fetchAllOrders] reached totalCount=${total}, stopping`)
+        nextCursor = undefined
+      }
     } catch (e: any) {
       console.log(`[fetchAllOrders] page ${page} ERROR: ${e.message}`)
       break
