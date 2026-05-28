@@ -75,58 +75,60 @@ function toArray<T>(val: T | T[] | undefined | null): T[] {
   return Array.isArray(val) ? val : [val]
 }
 
-// ── Fetch all orders (all pages, no shipNodeType filter) ──
-// Note: shipNodeType param causes hanging for some Walmart accounts.
-// Fetching without it returns ALL orders (SellerFulfilled + WFS combined).
-async function fetchAllOrders(
+// ── Fetch orders for a specific date window (max 1 page) ──
+async function fetchOrdersForWindow(
   clientId: string,
   clientSecret: string,
-  createdStartDate: string
+  startDate: string,
+  endDate: string
 ): Promise<any[]> {
-  const collected: any[] = []
-  let nextCursor: string | undefined
-  let page = 0
+  try {
+    const data = await walmartRequest('GET', '/orders', clientId, clientSecret, {
+      createdStartDate: startDate,
+      createdEndDate:   endDate,
+      limit:            200,
+    })
+    const orders = toArray(data?.list?.elements?.order)
+    const total  = data?.list?.meta?.totalCount
+    console.log(`[fetchWindow] ${startDate.slice(0,10)} → ${endDate.slice(0,10)}: ${orders.length} orders (total=${total})`)
+    return orders
+  } catch (e: any) {
+    console.log(`[fetchWindow] ERROR ${startDate.slice(0,10)}: ${e.message}`)
+    return []
+  }
+}
 
-  do {
-    page++
-    const params: Record<string, any> = { createdStartDate, limit: 200 }
-    if (nextCursor) params.nextCursor = nextCursor
+// ── Fetch ALL orders using 20-day windows (bypasses broken cursor pagination) ──
+async function fetchAllOrdersByWindows(
+  clientId: string,
+  clientSecret: string,
+  daysBack: number
+): Promise<any[]> {
+  const WINDOW_DAYS = 20  // ~8 orders/day × 20 = ~160 per window, safely under 200
+  const now  = Date.now()
+  const allOrdersMap = new Map<string, any>()
 
-    console.log(`[fetchAllOrders] page ${page}, cursor=${nextCursor ? 'yes' : 'none'}`)
-    try {
-      const data = await walmartRequest('GET', '/orders', clientId, clientSecret, params)
-      const orders = toArray(data?.list?.elements?.order)
-      const cursor  = data?.list?.meta?.nextCursor
-      const total   = data?.list?.meta?.totalCount
-      console.log(`[fetchAllOrders] page ${page} got ${orders.length} orders, total=${total}, cursor=${cursor ? cursor.substring(0,60) : 'null'}`)
-      collected.push(...orders)
+  for (let offset = 0; offset < daysBack; offset += WINDOW_DAYS) {
+    const windowEnd   = new Date(now - offset * 24 * 60 * 60 * 1000).toISOString()
+    const windowStart = new Date(now - Math.min(offset + WINDOW_DAYS, daysBack) * 24 * 60 * 60 * 1000).toISOString()
 
-      // Stop when: no cursor, cursor says hasMoreElements=false, or page < limit (last page)
-      // Do NOT stop based on totalCount — it's unreliable (shows remaining, not overall total)
-      const isLastPage = !cursor ||
-        (typeof cursor === 'string' && (
-          cursor.trim() === '' ||
-          cursor.includes('hasMoreElements=false') ||
-          cursor.includes('hasMoreElements%3Dfalse')
-        )) ||
-        orders.length < 200
+    const orders = await fetchOrdersForWindow(clientId, clientSecret, windowStart, windowEnd)
 
-      nextCursor = isLastPage ? undefined : (cursor as string)
-
-      if (isLastPage) console.log(`[fetchAllOrders] last page detected, stopping`)
-
-      // Safety cap: never exceed 50 pages (10,000 entries) to prevent infinite loops
-      if (page >= 50) {
-        console.log(`[fetchAllOrders] safety cap at 50 pages, stopping`)
-        nextCursor = undefined
+    // Merge lines per purchaseOrderId
+    for (const o of orders) {
+      const pid = o.purchaseOrderId as string
+      if (!allOrdersMap.has(pid)) {
+        allOrdersMap.set(pid, { ...o, orderLines: { orderLine: toArray(o.orderLines?.orderLine) } })
+      } else {
+        const existing = allOrdersMap.get(pid)!
+        const lineMap  = new Map(toArray(existing.orderLines?.orderLine).map((l: any) => [l.lineNumber, l]))
+        for (const nl of toArray(o.orderLines?.orderLine)) lineMap.set((nl as any).lineNumber, nl)
+        existing.orderLines.orderLine = Array.from(lineMap.values())
       }
-    } catch (e: any) {
-      console.log(`[fetchAllOrders] page ${page} ERROR: ${e.message}`)
-      break
     }
-  } while (nextCursor)
+  }
 
-  return collected
+  return Array.from(allOrdersMap.values())
 }
 
 // ── Get credentials ────────────────────────────────────
@@ -169,10 +171,10 @@ export async function syncOrders(orgId: string) {
   const createdStartDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString()
   console.log(`[syncOrders] Date range start: ${createdStartDate}`)
 
-  // Fetch ALL orders in one call (no shipNodeType — that param hangs for some accounts)
-  console.log(`[syncOrders] fetching all orders (no shipNodeType filter)...`)
-  const allOrdersList = await fetchAllOrders(clientId, clientSecret, createdStartDate)
-  console.log(`[syncOrders] total fetched from Walmart: ${allOrdersList.length}`)
+  // Fetch using 20-day windows to bypass Walmart's broken cursor pagination
+  console.log(`[syncOrders] fetching all orders via 20-day windows...`)
+  const allOrdersList = await fetchAllOrdersByWindows(clientId, clientSecret, 180)
+  console.log(`[syncOrders] total unique orders from Walmart: ${allOrdersList.length}`)
 
   const sellerResult = { status: 'fulfilled' as const, value: allOrdersList }
   const wfsResult    = { status: 'fulfilled' as const, value: [] as any[] }
