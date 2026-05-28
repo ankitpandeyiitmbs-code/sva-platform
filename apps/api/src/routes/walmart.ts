@@ -344,4 +344,44 @@ export async function walmartRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: result })
   })
 
+  // GET /walmart/revenue-check — compare DB revenue vs what Walmart API shows for same orders
+  app.get('/revenue-check', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const orgId = req.user.orgId
+
+    // Sample 5 orders from DB and show their items + totals
+    const orders = await prisma.order.findMany({
+      where: { orgId, channel: 'WALMART' },
+      include: { items: true },
+      take: 5,
+      orderBy: { orderedAt: 'desc' },
+    })
+
+    // Aggregate stats
+    const allItems = await prisma.orderItem.findMany({
+      where: { order: { orgId, channel: 'WALMART' } },
+      select: { quantity: true, unitPrice: true, total: true },
+    })
+
+    const totalUnits   = allItems.reduce((s, i) => s + i.quantity, 0)
+    const totalRevenue = allItems.reduce((s, i) => s + Number(i.total), 0)
+    const avgUnitPrice = totalRevenue / Math.max(1, totalUnits)
+
+    return reply.send({
+      success: true,
+      data: {
+        orderCount:   orders.length,
+        totalUnits,
+        totalRevenue: totalRevenue.toFixed(2),
+        avgUnitPrice: avgUnitPrice.toFixed(2),
+        sampleOrders: orders.map(o => ({
+          orderNumber: o.orderNumber,
+          total:       Number(o.total).toFixed(2),
+          itemCount:   o.items.length,
+          items:       o.items.map(i => ({ sku: i.sku, qty: i.quantity, unitPrice: Number(i.unitPrice).toFixed(2), total: Number(i.total).toFixed(2) })),
+        })),
+      },
+    })
+  })
+
 }

@@ -90,6 +90,7 @@ export async function orderRoutes(app: FastifyInstance) {
       where: { order: where },
       select: { sku: true, name: true, quantity: true, total: true },
     })
+    const totalUnits = items.reduce((s, i) => s + i.quantity, 0)
     const skuMap: Record<string, { name: string; qty: number; revenue: number }> = {}
     for (const item of items) {
       if (!skuMap[item.sku]) skuMap[item.sku] = { name: item.name, qty: 0, revenue: 0 }

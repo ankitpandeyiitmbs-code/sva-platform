@@ -177,7 +177,7 @@ export default function ChannelPage() {
               {t}
               {t === 'orders' && stats && (
                 <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-xs">
-                  {stats.allTime.orderCount}
+                  {(pagedOrders?.total ?? stats.allTime.orderCount).toLocaleString()}
                 </span>
               )}
             </button>
@@ -212,10 +212,10 @@ export default function ChannelPage() {
                 icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/30'
               },
               {
-                label: `Orders (${period}d)`,
-                value: statsLoading ? null : formatNumber(stats?.orderCount ?? 0),
-                sub: statsLoading ? null : `${formatCurrency(stats?.aov ?? 0)} avg`,
-                icon: ShoppingCart, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/30'
+                label: `Units Sold (${period}d)`,
+                value: statsLoading ? null : formatNumber(stats?.totalUnits ?? stats?.orderCount ?? 0),
+                sub: statsLoading ? null : `${formatNumber(stats?.orderCount ?? 0)} orders`,
+                icon: Package, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/30'
               },
               {
                 label: 'Avg Order Value',
@@ -256,6 +256,7 @@ export default function ChannelPage() {
               <span className="text-muted-foreground font-medium">All Time:</span>
               <span><strong>{formatCurrency(stats.allTime.revenue)}</strong> revenue</span>
               <span><strong>{formatNumber(stats.allTime.orderCount)}</strong> orders</span>
+              {stats.totalUnits > 0 && <span><strong>{formatNumber(stats.totalUnits)}</strong> units sold</span>}
               <span className="text-xs text-muted-foreground ml-auto">Showing last {period} days above ↑</span>
             </div>
           )}
