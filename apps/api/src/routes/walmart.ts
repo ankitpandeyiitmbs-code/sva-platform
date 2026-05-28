@@ -286,15 +286,25 @@ export async function walmartRoutes(app: FastifyInstance) {
         await prisma.$connect()
 
         const orders = await syncOrders(orgId)
-        app.log.info(`Walmart resync ORDERS done for ${orgId}: ${JSON.stringify(orders)}`)
-
-        const inventory = await syncInventory(orgId)
-        app.log.info(`Walmart resync INVENTORY done for ${orgId}: ${JSON.stringify(inventory)}`)
-
-        app.log.info(`Walmart resync COMPLETE for ${orgId}: orders=${orders.synced} totalFromWalmart=${orders.totalFromWalmart}`)
+        app.log.info(`Walmart resync COMPLETE for ${orgId}: synced=${orders.synced} totalFromWalmart=${orders.totalFromWalmart}`)
       } catch (err: any) {
         app.log.error(`Walmart resync FAILED for ${orgId}: ${err.message}`)
         app.log.error(err.stack ?? err.message)
+      }
+    })()
+  })
+
+  // POST /walmart/sync-inventory — sync product inventory separately (slow, runs in background)
+  app.post('/sync-inventory', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const orgId = req.user.orgId
+    reply.send({ success: true, message: 'Inventory sync started' })
+    ;(async () => {
+      try {
+        const result = await syncInventory(orgId)
+        app.log.info(`Walmart inventory sync COMPLETE for ${orgId}: ${JSON.stringify(result)}`)
+      } catch (err: any) {
+        app.log.error(`Walmart inventory sync FAILED for ${orgId}: ${err.message}`)
       }
     })()
   })
