@@ -168,7 +168,7 @@ export default function ChannelPage() {
   const meta    = CHANNEL_META[channel] ?? { label: channel, logo: channel[0], color: '#6B7280' }
   const qc      = useQueryClient()
 
-  const [tab, setTab]       = useState<'overview' | 'orders' | 'inventory'>('overview')
+  const [tab, setTab]       = useState<'overview' | 'orders' | 'inventory' | 'profit'>('overview')
   const [syncing, setSyncing] = useState(false)
   const [selected, setSelected] = useState<any>(null)
   const [search, setSearch]         = useState('')
@@ -226,6 +226,13 @@ export default function ChannelPage() {
     queryKey: ['channel-inventory', channel],
     queryFn: () => api.get('/inventory/products').then(r => r.data.data),
     enabled: tab === 'inventory',
+  })
+
+  const { data: profitData, isLoading: profitLoading } = useQuery({
+    queryKey: ['channel-profit', channel, dateRange.start.toISOString(), dateRange.end.toISOString()],
+    queryFn: () => api.get(`/orders/profit?channel=${channel}&startDate=${dateRange.start.toISOString()}&endDate=${dateRange.end.toISOString()}`).then(r => r.data.data),
+    enabled: tab === 'profit',
+    staleTime: 60_000,
   })
 
   const handleSync = async () => {
@@ -292,12 +299,12 @@ export default function ChannelPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-lg border bg-muted/40 p-1 w-fit">
-        {(['overview', 'orders', 'inventory'] as const).map(t => (
+        {(['overview', 'orders', 'inventory', 'profit'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={cn('rounded-md px-4 py-1.5 text-sm font-medium capitalize transition-colors',
               tab === t ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
             )}>
-            {t}
+{t === 'profit' ? '💰 Profit' : t.charAt(0).toUpperCase() + t.slice(1)}
             {t === 'orders' && stats && (
               <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-xs">
                 {stats.allTime?.orderCount?.toLocaleString()}
@@ -705,6 +712,110 @@ export default function ChannelPage() {
           </div>
         )
       })()}
+
+      {/* Profit & Loss tab */}
+      {tab === 'profit' && (
+        <div className="space-y-5">
+          {/* Summary KPI cards */}
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+            {[
+              { label: 'Net Profit', value: profitLoading ? null : formatCurrency(profitData?.summary?.netProfit ?? 0), sub: profitLoading ? null : `${profitData?.summary?.margin ?? 0}% margin`, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/30', icon: TrendingUp },
+              { label: 'Revenue', value: profitLoading ? null : formatCurrency(profitData?.summary?.revenue ?? 0), sub: profitLoading ? null : `${profitData?.summary?.orderCount ?? 0} orders`, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/30', icon: TrendingUp },
+              { label: 'Total COGS', value: profitLoading ? null : formatCurrency(profitData?.summary?.cogs ?? 0), sub: 'Cost of goods', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/30', icon: Package },
+              { label: 'Walmart Fees', value: profitLoading ? null : formatCurrency(profitData?.summary?.totalFees ?? 0), sub: 'Referral + fulfillment', color: 'text-red-600', bg: 'bg-red-50 dark:bg-red-950/30', icon: ShoppingCart },
+            ].map(card => (
+              <div key={card.label} className="rounded-xl border p-5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">{card.label}</p>
+                    {card.value === null ? <div className="mt-1 h-8 w-24 rounded bg-muted animate-pulse" /> : <p className="mt-1 text-2xl font-bold">{card.value}</p>}
+                    {card.sub && <p className="text-xs text-muted-foreground mt-0.5">{card.sub}</p>}
+                  </div>
+                  <div className={cn('rounded-xl p-2.5', card.bg)}><card.icon className={cn('h-5 w-5', card.color)} /></div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Profit formula strip */}
+          {profitData?.summary && (
+            <div className="rounded-xl border bg-muted/30 px-5 py-3 flex items-center gap-3 text-sm flex-wrap">
+              <span className="font-medium text-blue-600">{formatCurrency(profitData.summary.revenue)}</span>
+              <span className="text-muted-foreground">Revenue</span>
+              <span className="text-muted-foreground">−</span>
+              <span className="font-medium text-orange-600">{formatCurrency(profitData.summary.cogs)}</span>
+              <span className="text-muted-foreground">COGS</span>
+              <span className="text-muted-foreground">−</span>
+              <span className="font-medium text-red-600">{formatCurrency(profitData.summary.totalFees)}</span>
+              <span className="text-muted-foreground">Fees</span>
+              <span className="text-muted-foreground">=</span>
+              <span className={cn('font-bold text-lg', (profitData.summary.netProfit ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600')}>
+                {formatCurrency(profitData.summary.netProfit)} Net Profit
+              </span>
+              <span className="ml-auto text-xs text-muted-foreground">{profitData.summary.coveredSkus}/{profitData.summary.totalSkus} SKUs have cost data</span>
+            </div>
+          )}
+
+          {/* Profit + Revenue chart */}
+          {!profitLoading && (profitData?.chart ?? []).length > 0 && (
+            <div className="rounded-xl border p-5">
+              <h2 className="text-sm font-semibold mb-4">Revenue vs Net Profit — {fmtUTC(dateRange.start)} to {fmtUTC(dateRange.end)}</h2>
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={profitData!.chart}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis dataKey="date" tick={{ fontSize: 10 }}
+                      tickFormatter={d => { const [,m,day] = d.split('-'); return `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m)-1]} ${parseInt(day)}` }} />
+                    <YAxis tickFormatter={v => `$${v}`} tick={{ fontSize: 11 }} />
+                    <Tooltip formatter={(v: number, name: string) => [formatCurrency(v), name === 'revenue' ? 'Revenue' : 'Net Profit']} />
+                    <Bar dataKey="revenue" fill={meta.color} opacity={0.4} name="revenue" />
+                    <Bar dataKey="profit" fill="#10b981" name="profit" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {/* Per-product P&L table */}
+          <div className="rounded-xl border overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/40">
+                <tr>
+                  {['SKU','Units','Revenue','COGS','Ref. Fee','Fulfill. Fee','Total Fees','Net Payout','Net Profit','Margin'].map(h =>
+                    <th key={h} className="px-3 py-3 text-left font-medium text-muted-foreground">{h}</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {profitLoading ? [...Array(8)].map((_,i) => (
+                  <tr key={i} className="border-t">{[...Array(10)].map((_,j) =>
+                    <td key={j} className="px-3 py-3"><div className="h-3 rounded bg-muted animate-pulse w-12"/></td>
+                  )}</tr>
+                )) : (profitData?.products ?? []).length === 0 ? (
+                  <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">No orders in this period</td></tr>
+                ) : (profitData?.products ?? []).map((p: any) => (
+                  <tr key={p.sku} className={cn('border-t hover:bg-muted/10', !p.hasCosts && 'opacity-50')}>
+                    <td className="px-3 py-2 font-mono text-muted-foreground max-w-[100px] truncate">{p.sku}</td>
+                    <td className="px-3 py-2 tabular-nums">{p.units}</td>
+                    <td className="px-3 py-2 tabular-nums font-medium">{formatCurrency(p.revenue)}</td>
+                    <td className="px-3 py-2 tabular-nums text-orange-600">{p.hasCosts ? formatCurrency(p.cogs) : '—'}</td>
+                    <td className="px-3 py-2 tabular-nums text-red-500">{p.hasCosts ? formatCurrency(p.refFee) : '—'}</td>
+                    <td className="px-3 py-2 tabular-nums text-red-500">{p.hasCosts ? formatCurrency(p.fulfillmentFee) : '—'}</td>
+                    <td className="px-3 py-2 tabular-nums text-red-600 font-medium">{p.hasCosts ? formatCurrency(p.totalFees) : '—'}</td>
+                    <td className="px-3 py-2 tabular-nums">{p.hasCosts ? formatCurrency(p.netPayout) : '—'}</td>
+                    <td className={cn('px-3 py-2 tabular-nums font-bold', p.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600')}>
+                      {p.hasCosts ? formatCurrency(p.netProfit) : '—'}
+                    </td>
+                    <td className={cn('px-3 py-2 tabular-nums', p.margin >= 20 ? 'text-emerald-600' : p.margin >= 10 ? 'text-amber-600' : 'text-red-600')}>
+                      {p.hasCosts ? `${p.margin}%` : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

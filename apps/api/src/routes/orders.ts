@@ -126,8 +126,97 @@ export async function orderRoutes(app: FastifyInstance) {
       },
     })
   })
-}
 
-// ── Stats endpoint ─────────────────────────────────────────────
-// GET /orders/stats?channel=WALMART&days=30
-// Returns accurate server-side computed stats with proper date filtering
+  // GET /orders/profit — P&L by date range for a channel
+  app.get('/profit', async (req: any, reply: any) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const { channel, startDate, endDate } = req.query as any
+    const orgId = req.user.orgId
+    const { WALMART_COSTS } = await import('../lib/walmart-costs')
+
+    const where: any = { orgId, items: { some: {} } }
+    if (channel) where.channel = channel
+    if (startDate && endDate) {
+      where.orderedAt = { gte: new Date(startDate), lte: new Date(endDate) }
+    } else {
+      const since = new Date(); since.setDate(since.getDate() - 30)
+      where.orderedAt = { gte: since }
+    }
+
+    const orders = await prisma.order.findMany({
+      where,
+      include: { items: { select: { sku: true, quantity: true, unitPrice: true, total: true } } },
+    })
+
+    const skuMap = new Map<string, any>()
+    let totalRevenue = 0, totalCogs = 0, totalFees = 0, totalProfit = 0
+    const dayMap = new Map<string, { revenue: number; profit: number }>()
+
+    for (const order of orders) {
+      const day = order.orderedAt.toISOString().slice(0, 10)
+      if (!dayMap.has(day)) dayMap.set(day, { revenue: 0, profit: 0 })
+
+      for (const item of order.items) {
+        const costs = WALMART_COSTS[item.sku]
+        const qty = item.quantity
+        const revenue = Number(item.total)
+        const cogs = costs ? costs.cogs * qty : 0
+        const refFee = costs ? costs.refFee * qty : 0
+        const fulfillmentFee = costs ? costs.fulfillmentFee * qty : 0
+        const totalItemFees = costs ? costs.totalFees * qty : 0
+        const netPayout = revenue - totalItemFees
+        const netProfit = netPayout - cogs
+
+        totalRevenue += revenue
+        totalCogs += cogs
+        totalFees += totalItemFees
+        totalProfit += netProfit
+
+        const d = dayMap.get(day)!
+        d.revenue += revenue
+        d.profit += netProfit
+
+        const existing = skuMap.get(item.sku)
+        if (!existing) {
+          skuMap.set(item.sku, { sku: item.sku, units: qty, revenue, cogs, refFee, fulfillmentFee, totalFees: totalItemFees, netPayout, netProfit, hasCosts: !!costs })
+        } else {
+          existing.units += qty; existing.revenue += revenue; existing.cogs += cogs
+          existing.refFee += refFee; existing.fulfillmentFee += fulfillmentFee
+          existing.totalFees += totalItemFees; existing.netPayout += netPayout; existing.netProfit += netProfit
+        }
+      }
+    }
+
+    const chart = Array.from(dayMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, v]) => ({ date, revenue: +v.revenue.toFixed(2), profit: +v.profit.toFixed(2) }))
+
+    const products = Array.from(skuMap.values())
+      .sort((a: any, b: any) => b.netProfit - a.netProfit)
+      .map((p: any) => ({
+        ...p,
+        revenue: +p.revenue.toFixed(2), cogs: +p.cogs.toFixed(2),
+        refFee: +p.refFee.toFixed(2), fulfillmentFee: +p.fulfillmentFee.toFixed(2),
+        totalFees: +p.totalFees.toFixed(2), netPayout: +p.netPayout.toFixed(2),
+        netProfit: +p.netProfit.toFixed(2),
+        margin: p.revenue > 0 ? +((p.netProfit / p.revenue) * 100).toFixed(1) : 0,
+      }))
+
+    return reply.send({
+      success: true,
+      data: {
+        summary: {
+          revenue: +totalRevenue.toFixed(2), cogs: +totalCogs.toFixed(2),
+          totalFees: +totalFees.toFixed(2), netProfit: +totalProfit.toFixed(2),
+          margin: totalRevenue > 0 ? +((totalProfit / totalRevenue) * 100).toFixed(1) : 0,
+          orderCount: orders.length,
+          coveredSkus: products.filter((p: any) => p.hasCosts).length,
+          totalSkus: products.length,
+        },
+        chart,
+        products,
+      },
+    })
+  })
+
+}
