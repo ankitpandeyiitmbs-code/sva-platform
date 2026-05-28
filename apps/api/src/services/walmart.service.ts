@@ -347,14 +347,54 @@ async function getInventoryQuantity(
   return sellerQty + wfsQty
 }
 
+// ── Fetch ALL WFS inventory in one bulk call ──────────
+async function fetchAllWFSInventory(
+  clientId: string,
+  clientSecret: string
+): Promise<Map<string, number>> {
+  const wfsMap = new Map<string, number>()
+  let offset = 0
+  const limit = 200
+
+  do {
+    try {
+      const data = await walmartRequest('GET', '/fulfillment/inventory', clientId, clientSecret, { limit, offset })
+      const items = data?.payload?.inventory ?? []
+      const total = data?.headers?.totalCount ?? 0
+
+      for (const item of items) {
+        const sku = item.sku
+        if (!sku) continue
+        const qty = item.shipNodes?.[0]?.availToSellQty ?? 0
+        wfsMap.set(sku, qty)
+      }
+
+      console.log(`[WFS inventory] offset=${offset} got=${items.length} total=${total}`)
+      if (items.length < limit || wfsMap.size >= total) break
+      offset += limit
+    } catch (e: any) {
+      console.log(`[WFS inventory] error at offset=${offset}: ${e.message}`)
+      break
+    }
+  } while (true)
+
+  return wfsMap
+}
+
 // ── Sync inventory ─────────────────────────────────────
 export async function syncInventory(orgId: string) {
   const { creds } = await getChannelCreds(orgId)
   const { clientId, clientSecret } = creds
 
+  // Step 1: Fetch ALL WFS inventory in one bulk call
+  console.log('[syncInventory] fetching WFS inventory bulk...')
+  const wfsMap = await fetchAllWFSInventory(clientId, clientSecret)
+  console.log(`[syncInventory] WFS map: ${wfsMap.size} SKUs`)
+
   let nextCursor: string | undefined
   let totalSynced = 0
 
+  // Step 2: Paginate through all items
   do {
     const params: Record<string, any> = { limit: 200 }
     if (nextCursor) params.nextCursor = nextCursor
@@ -368,14 +408,26 @@ export async function syncInventory(orgId: string) {
       const sku = item.sku
       if (!sku) continue
 
-      // Get total quantity = seller-managed + WFS
-      const quantity = await getInventoryQuantity(clientId, clientSecret, sku)
+      // Step 3: Get seller-managed quantity
+      let sellerQty = 0
+      try {
+        const inv = await walmartRequest('GET', '/inventory', clientId, clientSecret, { sku })
+        sellerQty = parseInt(inv?.quantity?.amount ?? '0', 10)
+      } catch { /* not seller-fulfilled */ }
+
+      // Step 4: Get WFS quantity from pre-fetched bulk map
+      const wfsQty = wfsMap.get(sku) ?? 0
+
+      // Step 5: Combined quantity
+      const quantity = sellerQty + wfsQty
 
       const existing = await prisma.product.findFirst({ where: { orgId, sku } })
       const meta = {
         walmartItemId:    item.wpid,
         publishStatus:    item.publishedStatus,
-        fulfillmentType:  item.fulfillmentType ?? 'UNKNOWN',
+        fulfillmentType:  wfsQty > 0 ? 'WFS' : sellerQty > 0 ? 'SELLER' : 'UNKNOWN',
+        sellerQty,
+        wfsQty,
         source:           'WALMART',
         lastWalmartSync:  new Date().toISOString(),
       }
@@ -406,7 +458,8 @@ export async function syncInventory(orgId: string) {
     }
   } while (nextCursor)
 
-  return { synced: totalSynced }
+  console.log(`[syncInventory] COMPLETE. synced=${totalSynced} wfsItems=${wfsMap.size}`)
+  return { synced: totalSynced, wfsItems: wfsMap.size }
 }
 
 // ── Get status ─────────────────────────────────────────
