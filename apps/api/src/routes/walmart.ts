@@ -250,4 +250,38 @@ export async function walmartRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: { statusTests: results, lineStructure } })
   })
 
+  // POST /walmart/resync — clear and re-sync from scratch (fixes corrupted order data)
+  app.post('/resync', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const orgId = req.user.orgId
+
+    // Immediately respond, run in background
+    reply.send({ success: true, message: 'Full resync started — clearing old orders and re-pulling from Walmart' })
+
+    ;(async () => {
+      try {
+        // Delete all existing Walmart order items + orders for this org
+        const walmartOrders = await prisma.order.findMany({
+          where: { orgId, channel: 'WALMART' },
+          select: { id: true },
+        })
+        const orderIds = walmartOrders.map(o => o.id)
+        if (orderIds.length > 0) {
+          await prisma.orderItem.deleteMany({ where: { orderId: { in: orderIds } } })
+          await prisma.order.deleteMany({ where: { id: { in: orderIds } } })
+        }
+        app.log.info(`Walmart resync: cleared ${orderIds.length} existing orders for org ${orgId}`)
+
+        // Now run a fresh full sync
+        const [orders, inventory] = await Promise.all([
+          syncOrders(orgId),
+          syncInventory(orgId),
+        ])
+        app.log.info(`Walmart resync complete for ${orgId}: ${JSON.stringify({ orders, inventory })}`)
+      } catch (err: any) {
+        app.log.error(`Walmart resync failed for ${orgId}: ${err.message}`)
+      }
+    })()
+  })
+
 }

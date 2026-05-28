@@ -137,13 +137,34 @@ export async function syncOrders(orgId: string) {
     fetchByShipNodeType(clientId, clientSecret, createdStartDate, 'WalmartFulfilled'),
   ])
 
-  // Deduplicate by purchaseOrderId
+  // Walmart API sends one entry PER ORDER LINE (not per purchase order).
+  // Multiple lines in one order = same purchaseOrderId, different orderLine entries.
+  // We MERGE lines into one order instead of overwriting.
   const allOrdersMap = new Map<string, any>()
+
   for (const result of [sellerResult, wfsResult]) {
-    if (result.status === 'fulfilled') {
-      for (const o of result.value) allOrdersMap.set(o.purchaseOrderId, o)
+    if (result.status !== 'fulfilled') continue
+    for (const o of result.value) {
+      const pid = o.purchaseOrderId as string
+      if (!allOrdersMap.has(pid)) {
+        // Clone so we don't mutate the original
+        allOrdersMap.set(pid, {
+          ...o,
+          orderLines: { orderLine: toArray(o.orderLines?.orderLine) }
+        })
+      } else {
+        // Merge new lines into existing order
+        const existing = allOrdersMap.get(pid)!
+        const existingLines = toArray(existing.orderLines?.orderLine) as any[]
+        const newLines      = toArray(o.orderLines?.orderLine)         as any[]
+        // Dedup lines by lineNumber
+        const lineMap = new Map(existingLines.map((l: any) => [l.lineNumber, l]))
+        for (const nl of newLines) lineMap.set(nl.lineNumber, nl)
+        existing.orderLines.orderLine = Array.from(lineMap.values())
+      }
     }
   }
+
   const allOrders = Array.from(allOrdersMap.values())
 
   // Find which channelOrderIds already exist in DB (one query)
