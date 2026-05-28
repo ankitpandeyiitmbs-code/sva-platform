@@ -75,48 +75,45 @@ function toArray<T>(val: T | T[] | undefined | null): T[] {
   return Array.isArray(val) ? val : [val]
 }
 
-// ── Fetch orders for a specific date window (max 1 page) ──
+// ── Fetch orders for a specific date window ────────────
 async function fetchOrdersForWindow(
   clientId: string,
   clientSecret: string,
   startDate: string,
-  endDate: string
+  endDate: string,
+  shipNodeType?: string
 ): Promise<any[]> {
   try {
-    const data = await walmartRequest('GET', '/orders', clientId, clientSecret, {
+    const params: Record<string, any> = {
       createdStartDate: startDate,
       createdEndDate:   endDate,
       limit:            200,
-      // Include ALL order statuses — default may exclude Delivered/older orders
       orderStatuses:    'Created,Acknowledged,Shipped,Delivered,Cancelled',
-    })
+    }
+    if (shipNodeType) params.shipNodeType = shipNodeType
+
+    const data = await walmartRequest('GET', '/orders', clientId, clientSecret, params)
     const orders = toArray(data?.list?.elements?.order)
     const total  = data?.list?.meta?.totalCount
-    console.log(`[fetchWindow] ${startDate.slice(0,10)} → ${endDate.slice(0,10)}: ${orders.length} orders (total=${total})`)
+    console.log(`[fetchWindow${shipNodeType ? '-'+shipNodeType : ''}] ${startDate.slice(0,10)}→${endDate.slice(0,10)}: ${orders.length} orders (total=${total})`)
     return orders
   } catch (e: any) {
-    console.log(`[fetchWindow] ERROR ${startDate.slice(0,10)}: ${e.message}`)
+    console.log(`[fetchWindow] ERROR ${startDate.slice(0,10)} ${shipNodeType??'seller'}: ${e.message}`)
     return []
   }
 }
 
-// ── Fetch ALL orders using 20-day windows (bypasses broken cursor pagination) ──
+// ── Fetch ALL orders using 20-day windows (seller + WFS) ──
 async function fetchAllOrdersByWindows(
   clientId: string,
   clientSecret: string,
   daysBack: number
 ): Promise<any[]> {
-  const WINDOW_DAYS = 20  // ~8 orders/day × 20 = ~160 per window, safely under 200
+  const WINDOW_DAYS = 20
   const now  = Date.now()
   const allOrdersMap = new Map<string, any>()
 
-  for (let offset = 0; offset < daysBack; offset += WINDOW_DAYS) {
-    const windowEnd   = new Date(now - offset * 24 * 60 * 60 * 1000).toISOString()
-    const windowStart = new Date(now - Math.min(offset + WINDOW_DAYS, daysBack) * 24 * 60 * 60 * 1000).toISOString()
-
-    const orders = await fetchOrdersForWindow(clientId, clientSecret, windowStart, windowEnd)
-
-    // Merge lines per purchaseOrderId
+  const mergeInto = (orders: any[]) => {
     for (const o of orders) {
       const pid = o.purchaseOrderId as string
       if (!allOrdersMap.has(pid)) {
@@ -128,6 +125,20 @@ async function fetchAllOrdersByWindows(
         existing.orderLines.orderLine = Array.from(lineMap.values())
       }
     }
+  }
+
+  for (let offset = 0; offset < daysBack; offset += WINDOW_DAYS) {
+    const windowEnd   = new Date(now - offset * 86400000).toISOString()
+    const windowStart = new Date(now - Math.min(offset + WINDOW_DAYS, daysBack) * 86400000).toISOString()
+
+    // Fetch seller-fulfilled + WFS in parallel for each window
+    const [sellerOrders, wfsOrders] = await Promise.all([
+      fetchOrdersForWindow(clientId, clientSecret, windowStart, windowEnd),
+      fetchOrdersForWindow(clientId, clientSecret, windowStart, windowEnd, 'WFSFulfilled'),
+    ])
+
+    mergeInto(sellerOrders)
+    mergeInto(wfsOrders)
   }
 
   return Array.from(allOrdersMap.values())
