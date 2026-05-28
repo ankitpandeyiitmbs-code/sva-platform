@@ -13,20 +13,28 @@ async function getAccessToken(clientId: string, clientSecret: string): Promise<s
   if (cached && Date.now() < cached.expiresAt - 60_000) return cached.token
 
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
-  const res = await axios.post(
-    TOKEN_URL,
-    new URLSearchParams({ grant_type: 'client_credentials' }),
-    {
-      headers: {
-        Authorization: `Basic ${credentials}`,
-        'WM_SVC.NAME': 'SVA Platform',
-        'WM_QOS.CORRELATION_ID': randomUUID(),
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json',
-      },
-      timeout: 10000,
-    }
-  )
+  const tokenCtrl = new AbortController()
+  const tokenTimer = setTimeout(() => tokenCtrl.abort(), 10000)
+  let res: any
+  try {
+    res = await axios.post(
+      TOKEN_URL,
+      new URLSearchParams({ grant_type: 'client_credentials' }),
+      {
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          'WM_SVC.NAME': 'SVA Platform',
+          'WM_QOS.CORRELATION_ID': randomUUID(),
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+        },
+        signal: tokenCtrl.signal,
+        timeout: 10000,
+      }
+    )
+  } finally {
+    clearTimeout(tokenTimer)
+  }
   const { access_token, expires_in } = res.data
   tokenCache.set(clientId, { token: access_token, expiresAt: Date.now() + (expires_in ?? 900) * 1000 })
   return access_token
@@ -42,22 +50,29 @@ async function walmartRequest(
   body?: any
 ) {
   const token = await getAccessToken(clientId, clientSecret)
-  const res = await axios({
-    method,
-    url: `${BASE_URL}${path}`,
-    headers: {
-      'WM_SEC.ACCESS_TOKEN': token,
-      'WM_SVC.NAME': 'SVA Platform',
-      'WM_QOS.CORRELATION_ID': randomUUID(),
-      'WM_CONSUMER.CHANNEL.TYPE': '0f3e4dd4-0514-4346-b39d-af0e00ea066d',
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    params,
-    data: body,
-    timeout: 30000,
-  })
-  return res.data
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 25000)
+  try {
+    const res = await axios({
+      method,
+      url: `${BASE_URL}${path}`,
+      headers: {
+        'WM_SEC.ACCESS_TOKEN': token,
+        'WM_SVC.NAME': 'SVA Platform',
+        'WM_QOS.CORRELATION_ID': randomUUID(),
+        'WM_CONSUMER.CHANNEL.TYPE': '0f3e4dd4-0514-4346-b39d-af0e00ea066d',
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      params,
+      data: body,
+      timeout: 25000,
+      signal: ctrl.signal,
+    })
+    return res.data
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 // ── Normalise single item or array ────────────────────
