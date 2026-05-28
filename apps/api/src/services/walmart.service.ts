@@ -87,6 +87,8 @@ async function fetchOrdersForWindow(
       createdStartDate: startDate,
       createdEndDate:   endDate,
       limit:            200,
+      // Include ALL order statuses — default may exclude Delivered/older orders
+      orderStatuses:    'Created,Acknowledged,Shipped,Delivered,Cancelled',
     })
     const orders = toArray(data?.list?.elements?.order)
     const total  = data?.list?.meta?.totalCount
