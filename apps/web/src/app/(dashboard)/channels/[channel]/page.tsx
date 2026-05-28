@@ -39,15 +39,32 @@ const SYNC_ROUTES: Record<string, string> = {
 }
 
 // ── Date range presets ────────────────────────────────
+// Use UTC date boundaries so filtering is timezone-independent
+function utcDay(offsetDays = 0): Date {
+  const d = new Date()
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + offsetDays))
+}
+function utcDayEnd(offsetDays = 0): Date {
+  const d = new Date()
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + offsetDays, 23, 59, 59))
+}
+
 const PRESETS = [
-  { label: 'Today',         getRange: () => ({ start: startOfDay(new Date()), end: endOfDay(new Date()) }) },
-  { label: 'Yesterday',     getRange: () => ({ start: startOfDay(subDays(new Date(), 1)), end: endOfDay(subDays(new Date(), 1)) }) },
-  { label: 'Last 7 days',   getRange: () => ({ start: startOfDay(subDays(new Date(), 6)), end: endOfDay(new Date()) }) },
-  { label: 'Last 30 days',  getRange: () => ({ start: startOfDay(subDays(new Date(), 29)), end: endOfDay(new Date()) }) },
-  { label: 'This month',    getRange: () => ({ start: startOfMonth(new Date()), end: endOfDay(new Date()) }) },
-  { label: 'Last month',    getRange: () => ({ start: startOfMonth(subMonths(new Date(), 1)), end: endOfMonth(subMonths(new Date(), 1)) }) },
-  { label: 'Last 90 days',  getRange: () => ({ start: startOfDay(subDays(new Date(), 89)), end: endOfDay(new Date()) }) },
-  { label: 'Last 180 days', getRange: () => ({ start: startOfDay(subDays(new Date(), 179)), end: endOfDay(new Date()) }) },
+  { label: 'Today',         getRange: () => ({ start: utcDay(0),    end: utcDayEnd(0) }) },
+  { label: 'Yesterday',     getRange: () => ({ start: utcDay(-1),   end: utcDayEnd(-1) }) },
+  { label: 'Last 7 days',   getRange: () => ({ start: utcDay(-6),   end: utcDayEnd(0) }) },
+  { label: 'Last 30 days',  getRange: () => ({ start: utcDay(-29),  end: utcDayEnd(0) }) },
+  { label: 'This month',    getRange: () => {
+    const d = new Date(); return { start: new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)), end: utcDayEnd(0) }
+  }},
+  { label: 'Last month',    getRange: () => {
+    const d = new Date()
+    const s = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1))
+    const e = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0, 23, 59, 59))
+    return { start: s, end: e }
+  }},
+  { label: 'Last 90 days',  getRange: () => ({ start: utcDay(-89),  end: utcDayEnd(0) }) },
+  { label: 'Last 180 days', getRange: () => ({ start: utcDay(-179), end: utcDayEnd(0) }) },
 ]
 
 const FULFILLMENT_COLORS: Record<string, string> = {
@@ -125,7 +142,8 @@ function DateRangePicker({ start, end, onChange }: { start: Date; end: Date; onC
               const s = fromEl?.value
               const e2 = toEl?.value
               if (s && e2 && s <= e2) {
-                onChange(startOfDay(new Date(s + 'T00:00:00')), endOfDay(new Date(e2 + 'T00:00:00')))
+                // Parse as UTC midnight so dates are timezone-independent
+                onChange(new Date(s + 'T00:00:00Z'), new Date(e2 + 'T23:59:59Z'))
                 setOpen(false)
               }
             }}
@@ -155,8 +173,8 @@ export default function ChannelPage() {
 
   // Date range state — default last 30 days
   const [dateRange, setDateRange] = useState({
-    start: startOfDay(subDays(new Date(), 29)),
-    end:   endOfDay(new Date()),
+    start: utcDay(-29),
+    end:   utcDayEnd(0),
   })
 
   const { data: channelConfig } = useQuery({
