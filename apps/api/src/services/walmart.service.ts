@@ -13,23 +13,26 @@ async function getAccessToken(clientId: string, clientSecret: string): Promise<s
   if (cached && Date.now() < cached.expiresAt - 60_000) return cached.token
 
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
-  const tokenRequest = axios.post(
-    TOKEN_URL,
-    new URLSearchParams({ grant_type: 'client_credentials' }),
-    {
-      headers: {
-        Authorization: `Basic ${credentials}`,
-        'WM_SVC.NAME': 'SVA Platform',
-        'WM_QOS.CORRELATION_ID': randomUUID(),
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json',
-      },
-    }
-  )
-  const tokenTimeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('Walmart token request timed out after 12s')), 12000)
-  )
-  const res = await Promise.race([tokenRequest, tokenTimeout])
+  console.log(`[getToken] firing axios.post to ${TOKEN_URL}`)
+  let res: any
+  try {
+    res = await Promise.race([
+      axios.post(TOKEN_URL, new URLSearchParams({ grant_type: 'client_credentials' }), {
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          'WM_SVC.NAME': 'SVA Platform',
+          'WM_QOS.CORRELATION_ID': randomUUID(),
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+        },
+      }),
+      new Promise<never>((_, rej) => setTimeout(() => { console.log('[getToken] TIMEOUT at 12s'); rej(new Error('token timeout')) }, 12000))
+    ])
+    console.log(`[getToken] response received, status=${res.status}`)
+  } catch (e: any) {
+    console.log(`[getToken] ERROR: ${e.message}`)
+    throw e
+  }
   const { access_token, expires_in } = res.data
   tokenCache.set(clientId, { token: access_token, expiresAt: Date.now() + (expires_in ?? 900) * 1000 })
   return access_token
@@ -140,11 +143,19 @@ export async function syncOrders(orgId: string) {
   const createdStartDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString()
   console.log(`[syncOrders] Date range start: ${createdStartDate}`)
 
-  // Fetch both fulfillment types in parallel
-  const [sellerResult, wfsResult] = await Promise.allSettled([
-    fetchByShipNodeType(clientId, clientSecret, createdStartDate, 'SellerFulfilled'),
-    fetchByShipNodeType(clientId, clientSecret, createdStartDate, 'WalmartFulfilled'),
-  ])
+  // Fetch SEQUENTIALLY so we can isolate which call hangs
+  console.log(`[syncOrders] fetching SellerFulfilled...`)
+  const sellerOrders = await fetchByShipNodeType(clientId, clientSecret, createdStartDate, 'SellerFulfilled')
+    .catch((e: any) => { console.log(`[syncOrders] SellerFulfilled ERR: ${e.message}`); return [] as any[] })
+  console.log(`[syncOrders] SellerFulfilled: ${sellerOrders.length} entries`)
+
+  console.log(`[syncOrders] fetching WalmartFulfilled (WFS)...`)
+  const wfsOrders = await fetchByShipNodeType(clientId, clientSecret, createdStartDate, 'WalmartFulfilled')
+    .catch((e: any) => { console.log(`[syncOrders] WFS ERR: ${e.message}`); return [] as any[] })
+  console.log(`[syncOrders] WalmartFulfilled: ${wfsOrders.length} entries`)
+
+  const sellerResult = { status: 'fulfilled' as const, value: sellerOrders }
+  const wfsResult    = { status: 'fulfilled' as const, value: wfsOrders }
 
   // Walmart API sends one entry PER ORDER LINE (not per purchase order).
   // Multiple lines in one order = same purchaseOrderId, different orderLine entries.
