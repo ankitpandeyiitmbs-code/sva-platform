@@ -10,7 +10,7 @@ export async function userRoutes(app: FastifyInstance) {
   app.get('/', { preHandler: requirePermission('users:read') }, async (req, reply) => {
     const users = await prisma.user.findMany({
       where: { orgId: req.user!.orgId },
-      select: { id: true, email: true, name: true, role: true, isActive: true, avatarUrl: true, lastLoginAt: true, createdAt: true, phone: true },
+      select: { id: true, email: true, name: true, role: true, isActive: true, avatarUrl: true, lastLoginAt: true, createdAt: true },
       orderBy: { name: 'asc' },
     })
     return reply.send({ success: true, data: users })
@@ -64,7 +64,7 @@ export async function userRoutes(app: FastifyInstance) {
     if (role !== undefined)     updates.role = role
     if (isActive !== undefined) updates.isActive = isActive
     if (name !== undefined)     updates.name = name
-    if (phone !== undefined)    updates.phone = phone
+    // phone field removed
 
     const user = await prisma.user.update({
       where: { id },
