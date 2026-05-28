@@ -98,10 +98,11 @@ async function fetchAllOrders(
       const orders = toArray(data?.list?.elements?.order)
       const cursor  = data?.list?.meta?.nextCursor
       const total   = data?.list?.meta?.totalCount
-      console.log(`[fetchAllOrders] page ${page} got ${orders.length} orders, total=${total}, hasMore=${!!cursor}`)
+      console.log(`[fetchAllOrders] page ${page} got ${orders.length} orders, total=${total}, cursor=${cursor ? cursor.substring(0,60) : 'null'}`)
       collected.push(...orders)
 
-      // Stop if: no cursor, cursor says hasMoreElements=false, or got fewer than limit (last page)
+      // Stop when: no cursor, cursor says hasMoreElements=false, or page < limit (last page)
+      // Do NOT stop based on totalCount — it's unreliable (shows remaining, not overall total)
       const isLastPage = !cursor ||
         (typeof cursor === 'string' && (
           cursor.trim() === '' ||
@@ -112,9 +113,11 @@ async function fetchAllOrders(
 
       nextCursor = isLastPage ? undefined : (cursor as string)
 
-      // Safety: never exceed total count reported by API
-      if (total && collected.length >= total) {
-        console.log(`[fetchAllOrders] reached totalCount=${total}, stopping`)
+      if (isLastPage) console.log(`[fetchAllOrders] last page detected, stopping`)
+
+      // Safety cap: never exceed 50 pages (10,000 entries) to prevent infinite loops
+      if (page >= 50) {
+        console.log(`[fetchAllOrders] safety cap at 50 pages, stopping`)
         nextCursor = undefined
       }
     } catch (e: any) {
