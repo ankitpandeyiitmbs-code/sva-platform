@@ -255,31 +255,46 @@ export async function walmartRoutes(app: FastifyInstance) {
     if (!req.user) return reply.code(401).send({ success: false })
     const orgId = req.user.orgId
 
-    // Immediately respond, run in background
     reply.send({ success: true, message: 'Full resync started — clearing old orders and re-pulling from Walmart' })
 
     ;(async () => {
       try {
-        // Delete all existing Walmart order items + orders for this org
+        // Reconnect to DB before heavy operations
+        await prisma.$disconnect()
+        await prisma.$connect()
+
+        // Delete existing Walmart orders in chunks to avoid connection pressure
         const walmartOrders = await prisma.order.findMany({
           where: { orgId, channel: 'WALMART' },
           select: { id: true },
         })
         const orderIds = walmartOrders.map(o => o.id)
+
         if (orderIds.length > 0) {
-          await prisma.orderItem.deleteMany({ where: { orderId: { in: orderIds } } })
-          await prisma.order.deleteMany({ where: { id: { in: orderIds } } })
+          // Delete in batches of 50
+          const BATCH = 50
+          for (let i = 0; i < orderIds.length; i += BATCH) {
+            const batch = orderIds.slice(i, i + BATCH)
+            await prisma.orderItem.deleteMany({ where: { orderId: { in: batch } } })
+            await prisma.order.deleteMany({ where: { id: { in: batch } } })
+          }
         }
         app.log.info(`Walmart resync: cleared ${orderIds.length} existing orders for org ${orgId}`)
 
-        // Now run a fresh full sync
-        const [orders, inventory] = await Promise.all([
-          syncOrders(orgId),
-          syncInventory(orgId),
-        ])
-        app.log.info(`Walmart resync complete for ${orgId}: ${JSON.stringify({ orders, inventory })}`)
+        // Reconnect again after deletes before the big fetch+insert
+        await prisma.$disconnect()
+        await prisma.$connect()
+
+        const orders = await syncOrders(orgId)
+        app.log.info(`Walmart resync ORDERS done for ${orgId}: ${JSON.stringify(orders)}`)
+
+        const inventory = await syncInventory(orgId)
+        app.log.info(`Walmart resync INVENTORY done for ${orgId}: ${JSON.stringify(inventory)}`)
+
+        app.log.info(`Walmart resync COMPLETE for ${orgId}: orders=${orders.synced} totalFromWalmart=${orders.totalFromWalmart}`)
       } catch (err: any) {
-        app.log.error(`Walmart resync failed for ${orgId}: ${err.message}`)
+        app.log.error(`Walmart resync FAILED for ${orgId}: ${err.message}`)
+        app.log.error(err.stack ?? err.message)
       }
     })()
   })
