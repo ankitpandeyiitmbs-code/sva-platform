@@ -58,8 +58,6 @@ const FULFILLMENT_COLORS: Record<string, string> = {
 
 function DateRangePicker({ start, end, onChange }: { start: Date; end: Date; onChange: (s: Date, e: Date) => void }) {
   const [open, setOpen] = useState(false)
-  const [tempStart, setTempStart] = useState('')
-  const [tempEnd, setTempEnd] = useState('')
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -71,13 +69,6 @@ function DateRangePicker({ start, end, onChange }: { start: Date; end: Date; onC
   const label = start.toDateString() === end.toDateString()
     ? format(start, 'MMM d, yyyy')
     : `${format(start, 'MMM d, yyyy')} – ${format(end, 'MMM d, yyyy')}`
-
-  const applyCustom = () => {
-    if (tempStart && tempEnd) {
-      onChange(new Date(tempStart), endOfDay(new Date(tempEnd)))
-      setOpen(false)
-    }
-  }
 
   return (
     <div ref={ref} className="relative">
@@ -111,20 +102,35 @@ function DateRangePicker({ start, end, onChange }: { start: Date; end: Date; onC
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <p className="text-xs text-muted-foreground mb-1">From</p>
-                <input type="date" value={tempStart || format(start, 'yyyy-MM-dd')}
-                  onChange={e => setTempStart(e.target.value)}
+                <input
+                  id="dp-from"
+                  type="date"
+                  defaultValue={format(start, 'yyyy-MM-dd')}
+                  key={start.toISOString()}
                   className="w-full rounded-lg border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-primary" />
               </div>
               <div>
                 <p className="text-xs text-muted-foreground mb-1">To</p>
-                <input type="date" value={tempEnd || format(end, 'yyyy-MM-dd')}
-                  onChange={e => setTempEnd(e.target.value)}
+                <input
+                  id="dp-to"
+                  type="date"
+                  defaultValue={format(end, 'yyyy-MM-dd')}
+                  key={end.toISOString()}
                   className="w-full rounded-lg border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-primary" />
               </div>
             </div>
-            <button onClick={applyCustom}
+            <button onClick={() => {
+              const fromEl = document.getElementById('dp-from') as HTMLInputElement
+              const toEl   = document.getElementById('dp-to')   as HTMLInputElement
+              const s = fromEl?.value
+              const e2 = toEl?.value
+              if (s && e2 && s <= e2) {
+                onChange(startOfDay(new Date(s + 'T00:00:00')), endOfDay(new Date(e2 + 'T00:00:00')))
+                setOpen(false)
+              }
+            }}
               className="w-full rounded-lg bg-primary text-primary-foreground py-2 text-sm font-medium hover:bg-primary/90 transition-colors">
-              Apply
+              Apply Custom Range
             </button>
           </div>
         </div>
