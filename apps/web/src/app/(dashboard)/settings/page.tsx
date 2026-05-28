@@ -53,7 +53,7 @@ export default function SettingsPage() {
 
   const tabs = [
     { key: 'channels', label: 'Channel Integrations', icon: Link2 },
-    { key: 'team', label: 'Team & Users', icon: Users },
+    { key: 'team', label: 'Team', icon: Users },
     { key: 'security', label: 'Security & 2FA', icon: Shield },
     { key: 'notifications', label: 'Notifications', icon: Bell },
   ]
@@ -348,8 +348,8 @@ function TeamSettings() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="font-semibold">Team Members</h3>
-          <p className="text-sm text-muted-foreground">{users.length} member{users.length !== 1 ? 's' : ''} in your organization</p>
+          <h3 className="font-semibold">Team</h3>
+          <p className="text-sm text-muted-foreground">{users.length} member{users.length !== 1 ? 's' : ''} in your workspace</p>
         </div>
         {isAdmin && (
           <button onClick={() => setInviteOpen(!inviteOpen)}
@@ -409,7 +409,7 @@ function TeamSettings() {
       <div className="rounded-xl border overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-muted/40">
-            <tr>{['Member','Email','Role','Status','Last Login','Actions'].map((h) => (
+            <tr>{['Member','Email',...(isAdmin ? ['Role'] : []),'Status','Last Login',...(isAdmin ? ['Actions'] : [])].map((h) => (
               <th key={h} className="px-4 py-3 text-left font-medium text-muted-foreground text-xs">{h}</th>
             ))}</tr>
           </thead>
@@ -426,7 +426,7 @@ function TeamSettings() {
                   </div>
                 </td>
                 <td className="px-4 py-3 text-muted-foreground text-xs">{u.email}</td>
-                <td className="px-4 py-3">
+                {isAdmin && (<td className="px-4 py-3">
                   {isAdmin && editingRole === u.id ? (
                     <select autoFocus defaultValue={u.role}
                       onChange={e => updateRole(u.id, e.target.value)}
@@ -444,7 +444,7 @@ function TeamSettings() {
                       {isAdmin && u.id !== me?.id && u.role !== 'SUPER_ADMIN' && <span className="ml-1 opacity-50">▾</span>}
                     </button>
                   )}
-                </td>
+                </td>)}
                 <td className="px-4 py-3">
                   <span className={cn('rounded-full px-2 py-0.5 text-xs', u.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800')}>
                     {u.isActive ? 'Active' : 'Inactive'}
@@ -455,7 +455,6 @@ function TeamSettings() {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1">
-                    {/* Chat button */}
                     {u.id !== me?.id && (
                       <a href={`/chat?dm=${u.id}`}
                         className="rounded-lg border px-2 py-1 text-xs hover:bg-muted transition-colors flex items-center gap-1">
@@ -478,8 +477,8 @@ function TeamSettings() {
         </table>
       </div>
 
-      {/* Role legend */}
-      <div className="rounded-xl border p-4">
+      {/* Role legend - only for admins */}
+      {isAdmin && <div className="rounded-xl border p-4">
         <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Role Access Levels</p>
         <div className="grid grid-cols-2 gap-y-1 text-xs text-muted-foreground">
           <span><span className="font-medium text-red-700">SUPER_ADMIN</span> — Full access, manage users & roles</span>
@@ -489,7 +488,7 @@ function TeamSettings() {
           <span><span className="font-medium text-purple-700">MARKETING</span> — CRM, campaigns, analytics</span>
           <span><span className="font-medium text-gray-700">VIEWER</span> — Read-only access to all sections</span>
         </div>
-      </div>
+      </div>}
     </div>
   )
 }

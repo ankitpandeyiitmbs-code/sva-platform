@@ -194,7 +194,9 @@ export function Sidebar() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="truncate text-xs font-medium text-white">{user.email}</p>
-              <p className="text-xs text-sidebar-foreground/50">{user.role}</p>
+              {user.role === 'SUPER_ADMIN' && (
+                <p className="text-xs text-sidebar-foreground/50">Admin</p>
+              )}
             </div>
             <button onClick={() => logout()} className="text-sidebar-foreground/40 hover:text-sidebar-foreground">
               <LogOut className="h-4 w-4" />
