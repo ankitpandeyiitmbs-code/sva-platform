@@ -384,4 +384,62 @@ export async function walmartRoutes(app: FastifyInstance) {
     })
   })
 
+  // GET /walmart/wfs-inventory-check?sku=xxx — raw WFS inventory response for a SKU
+  app.get('/wfs-inventory-check', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const { sku } = req.query as any
+    if (!sku) return reply.code(400).send({ success: false, message: 'sku required' })
+
+    const c = await prisma.channelConfig.findFirst({
+      where: { orgId: req.user.orgId, channel: 'WALMART', status: 'CONNECTED' },
+    })
+    if (!c) return reply.code(400).send({ success: false })
+    const { clientId, clientSecret } = c.credentials as any
+
+    const axios = (await import('axios')).default
+    const { randomUUID } = await import('crypto')
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
+    const tokenRes = await axios.post(
+      'https://marketplace.walmartapis.com/v3/token',
+      new URLSearchParams({ grant_type: 'client_credentials' }),
+      { headers: { Authorization: `Basic ${credentials}`, 'WM_SVC.NAME': 'SVA', 'WM_QOS.CORRELATION_ID': randomUUID(), 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, timeout: 10000 }
+    )
+    const token = tokenRes.data.access_token
+    const headers = {
+      'WM_SEC.ACCESS_TOKEN': token, 'WM_SVC.NAME': 'SVA',
+      'WM_QOS.CORRELATION_ID': randomUUID(),
+      'WM_CONSUMER.CHANNEL.TYPE': '0f3e4dd4-0514-4346-b39d-af0e00ea066d',
+      Accept: 'application/json',
+    }
+
+    // Try multiple possible WFS endpoints
+    const results: any = {}
+
+    // 1. Standard inventory
+    try {
+      const r = await axios.get('https://marketplace.walmartapis.com/v3/inventory', { headers: { ...headers, 'WM_QOS.CORRELATION_ID': randomUUID() }, params: { sku }, timeout: 15000 })
+      results.v3_inventory = r.data
+    } catch (e: any) { results.v3_inventory_error = e.response?.data ?? e.message }
+
+    // 2. WFS fulfillment inventory
+    try {
+      const r = await axios.get('https://marketplace.walmartapis.com/v3/fulfillment/inventory', { headers: { ...headers, 'WM_QOS.CORRELATION_ID': randomUUID() }, params: { sku }, timeout: 15000 })
+      results.v3_fulfillment_inventory = r.data
+    } catch (e: any) { results.v3_fulfillment_inventory_error = e.response?.data ?? e.message }
+
+    // 3. WFS inventory-details
+    try {
+      const r = await axios.get('https://marketplace.walmartapis.com/v3/fulfillment/inventory-details', { headers: { ...headers, 'WM_QOS.CORRELATION_ID': randomUUID() }, params: { sku }, timeout: 15000 })
+      results.v3_fulfillment_inventory_details = r.data
+    } catch (e: any) { results.v3_fulfillment_inventory_details_error = e.response?.data ?? e.message }
+
+    // 4. WFS with skuList param
+    try {
+      const r = await axios.get('https://marketplace.walmartapis.com/v3/fulfillment/inventory', { headers: { ...headers, 'WM_QOS.CORRELATION_ID': randomUUID() }, params: { skuList: sku }, timeout: 15000 })
+      results.v3_fulfillment_skuList = r.data
+    } catch (e: any) { results.v3_fulfillment_skuList_error = e.response?.data ?? e.message }
+
+    return reply.send({ success: true, data: { sku, results } })
+  })
+
 }
