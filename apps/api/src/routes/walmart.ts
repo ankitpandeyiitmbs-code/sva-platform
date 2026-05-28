@@ -301,4 +301,47 @@ export async function walmartRoutes(app: FastifyInstance) {
     })()
   })
 
+  // GET /walmart/test-connectivity — test raw Walmart API reachability from Railway
+  app.get('/test-connectivity', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const https = await import('https')
+    const start = Date.now()
+    
+    const result = await new Promise<any>((resolve) => {
+      const timer = setTimeout(() => {
+        req_obj.destroy()
+        resolve({ status: 'TIMEOUT', elapsed: Date.now() - start, message: 'No response after 8s — Walmart API unreachable from Railway IP' })
+      }, 8000)
+      
+      const req_obj = https.request({
+        hostname: 'marketplace.walmartapis.com',
+        port: 443,
+        path: '/v3/token',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 8000,
+      }, (res) => {
+        clearTimeout(timer)
+        resolve({ status: 'CONNECTED', httpStatus: res.statusCode, elapsed: Date.now() - start })
+        res.resume()
+      })
+      
+      req_obj.on('error', (err) => {
+        clearTimeout(timer)
+        resolve({ status: 'ERROR', error: err.message, elapsed: Date.now() - start })
+      })
+      
+      req_obj.on('timeout', () => {
+        clearTimeout(timer)
+        req_obj.destroy()
+        resolve({ status: 'SOCKET_TIMEOUT', elapsed: Date.now() - start })
+      })
+      
+      req_obj.write('grant_type=client_credentials')
+      req_obj.end()
+    })
+    
+    return reply.send({ success: true, data: result })
+  })
+
 }
