@@ -171,9 +171,16 @@ export default function ChannelPage() {
   const [tab, setTab]       = useState<'overview' | 'orders' | 'inventory'>('overview')
   const [syncing, setSyncing] = useState(false)
   const [selected, setSelected] = useState<any>(null)
-  const [search, setSearch]     = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
-  const [orderPage, setOrderPage] = useState(1)
+  const [search, setSearch]         = useState('')
+  const [statusFilter, setStatusFilter]   = useState('')
+  const [orderFulfillment, setOrderFulfillment] = useState('')
+  const [orderPage, setOrderPage]     = useState(1)
+
+  // Inventory filters
+  const [invSearch, setInvSearch]     = useState('')
+  const [invFulfill, setInvFulfill]   = useState('') // WFS | SELLER | ''
+  const [invStock, setInvStock]       = useState('') // low | ok | ''
+  const [invSort, setInvSort]         = useState('name') // name | qty-asc | qty-desc
 
   // Date range state — default last 30 days
   const [dateRange, setDateRange] = useState({
@@ -195,11 +202,12 @@ export default function ChannelPage() {
 
   // Orders table
   const { data: pagedOrders, isLoading: ordersLoading } = useQuery({
-    queryKey: ['channel-orders', channel, orderPage, search, statusFilter, dateRange.start.toISOString(), dateRange.end.toISOString()],
+    queryKey: ['channel-orders', channel, orderPage, search, statusFilter, orderFulfillment, dateRange.start.toISOString(), dateRange.end.toISOString()],
     queryFn: () => {
       const p = new URLSearchParams({ channel, limit: '50', page: String(orderPage) })
       if (search) p.set('search', search)
       if (statusFilter) p.set('status', statusFilter)
+      if (orderFulfillment) p.set('fulfillmentStatus', orderFulfillment)
       // Date filter for orders table
       p.set('startDate', dateRange.start.toISOString())
       p.set('endDate', dateRange.end.toISOString())
@@ -439,6 +447,13 @@ export default function ChannelPage() {
                 <option value="">All Statuses</option>
                 {['PENDING','PROCESSING','SHIPPED','DELIVERED','COMPLETED','CANCELLED'].map(s => <option key={s} value={s}>{s}</option>)}
               </select>
+              <select value={orderFulfillment} onChange={e => { setOrderFulfillment(e.target.value); setOrderPage(1) }}
+                className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary">
+                <option value="">All Fulfillment</option>
+                <option value="FULFILLED">Fulfilled</option>
+                <option value="UNFULFILLED">Unfulfilled</option>
+                <option value="PARTIAL">Partial</option>
+              </select>
               <span className="ml-auto text-sm text-muted-foreground">
                 {pagedOrders?.total?.toLocaleString() ?? '…'} orders in period
               </span>
@@ -552,55 +567,144 @@ export default function ChannelPage() {
       )}
 
       {/* Inventory tab */}
-      {tab === 'inventory' && (
-        <div className="rounded-xl border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40">
-              <tr>{['SKU','Product','In Stock','Fulfillment','Status'].map(h =>
-                <th key={h} className="px-4 py-3 text-left font-medium text-muted-foreground">{h}</th>
-              )}</tr>
-            </thead>
-            <tbody>
-              {!inventoryData ? [...Array(8)].map((_,i) => (
-                <tr key={i} className="border-t">{[...Array(5)].map((_,j) =>
-                  <td key={j} className="px-4 py-3"><div className="h-4 rounded bg-muted animate-pulse w-20"/></td>
-                )}</tr>
-              )) : inventoryData.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-16 text-center text-muted-foreground">
-                  <Package className="h-8 w-8 mx-auto mb-2 opacity-30"/>No inventory — sync first
-                </td></tr>
-              ) : inventoryData.map((product: any) => {
-                const items = product.inventoryItems ?? []
-                const channelItem = items.find((i: any) => i.channel === channel) ?? items[0]
-                const qty     = channelItem?.quantity ?? 0
-                const reorder = channelItem?.reorderPoint ?? 10
-                const low     = qty <= reorder
-                const meta2   = (product.customFields as any) ?? {}
-                const fulfillType = meta2.fulfillmentType ?? (meta2.wfsQty > 0 ? 'WFS' : 'SELLER')
-                return (
-                  <tr key={product.id} className="border-t hover:bg-muted/20 transition-colors">
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{product.sku}</td>
-                    <td className="px-4 py-3 font-medium max-w-[200px] truncate">{product.name}</td>
-                    <td className={cn('px-4 py-3 font-bold tabular-nums', low ? 'text-red-600' : '')}>{qty.toLocaleString()}</td>
-                    <td className="px-4 py-3">
-                      <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium',
-                        fulfillType === 'WFS' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700')}>
-                        {fulfillType === 'WFS' ? 'WFS' : 'Seller'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {low
-                        ? <span className="flex items-center gap-1 text-xs font-medium text-amber-600"><AlertTriangle className="h-3 w-3"/>Low Stock</span>
-                        : <span className="text-xs text-emerald-600 font-medium">OK</span>
-                      }
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {tab === 'inventory' && (() => {
+        // Apply client-side filters
+        const allItems = inventoryData ?? []
+        const filtered = allItems.filter((product: any) => {
+          const items     = product.inventoryItems ?? []
+          const ci        = items.find((i: any) => i.channel === channel) ?? items[0]
+          const qty       = ci?.quantity ?? 0
+          const reorder   = ci?.reorderPoint ?? 10
+          const low       = qty <= reorder
+          const meta2     = (product.customFields as any) ?? {}
+          const ft        = meta2.fulfillmentType ?? (meta2.wfsQty > 0 ? 'WFS' : 'SELLER')
+
+          if (invSearch && !product.sku.toLowerCase().includes(invSearch.toLowerCase()) &&
+                           !product.name.toLowerCase().includes(invSearch.toLowerCase())) return false
+          if (invFulfill && ft !== invFulfill) return false
+          if (invStock === 'low' && !low) return false
+          if (invStock === 'ok'  && low)  return false
+          return true
+        })
+
+        const sorted = [...filtered].sort((a: any, b: any) => {
+          const getQty = (p: any) => { const ci = (p.inventoryItems ?? []).find((i: any) => i.channel === channel) ?? p.inventoryItems?.[0]; return ci?.quantity ?? 0 }
+          if (invSort === 'qty-asc')  return getQty(a) - getQty(b)
+          if (invSort === 'qty-desc') return getQty(b) - getQty(a)
+          return a.name.localeCompare(b.name)
+        })
+
+        return (
+          <div className="space-y-3">
+            {/* Filter bar */}
+            <div className="flex flex-wrap items-center gap-2">
+              <input value={invSearch} onChange={e => setInvSearch(e.target.value)}
+                placeholder="Search SKU or product..."
+                className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary flex-1 min-w-[180px] max-w-xs" />
+
+              {/* Fulfillment type */}
+              <div className="flex rounded-lg border overflow-hidden text-sm">
+                {[{v:'',l:'All'},{v:'WFS',l:'WFS'},{v:'SELLER',l:'Seller'}].map(opt => (
+                  <button key={opt.v} onClick={() => setInvFulfill(opt.v)}
+                    className={cn('px-3 py-2 font-medium transition-colors',
+                      invFulfill === opt.v ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground')}>
+                    {opt.l}
+                  </button>
+                ))}
+              </div>
+
+              {/* Stock status */}
+              <div className="flex rounded-lg border overflow-hidden text-sm">
+                {[{v:'',l:'All Stock'},{v:'ok',l:'In Stock'},{v:'low',l:'Low Stock'}].map(opt => (
+                  <button key={opt.v} onClick={() => setInvStock(opt.v)}
+                    className={cn('px-3 py-2 font-medium transition-colors',
+                      invStock === opt.v ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground')}>
+                    {opt.l}
+                  </button>
+                ))}
+              </div>
+
+              {/* Sort */}
+              <select value={invSort} onChange={e => setInvSort(e.target.value)}
+                className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary ml-auto">
+                <option value="name">Sort: Name A–Z</option>
+                <option value="qty-desc">Sort: Most Stock</option>
+                <option value="qty-asc">Sort: Least Stock</option>
+              </select>
+
+              <span className="text-sm text-muted-foreground">{sorted.length} items</span>
+            </div>
+
+            {/* Summary chips */}
+            {!inventoryData ? null : (
+              <div className="flex gap-3 text-xs flex-wrap">
+                {[
+                  { label: 'Total SKUs',  value: allItems.length, color: 'bg-muted text-muted-foreground' },
+                  { label: 'WFS items',   value: allItems.filter((p: any) => ((p.customFields as any)?.fulfillmentType ?? (((p.customFields as any)?.wfsQty ?? 0) > 0 ? 'WFS' : 'SELLER')) === 'WFS').length, color: 'bg-blue-100 text-blue-700' },
+                  { label: 'Seller items',value: allItems.filter((p: any) => ((p.customFields as any)?.fulfillmentType ?? (((p.customFields as any)?.wfsQty ?? 0) > 0 ? 'WFS' : 'SELLER')) === 'SELLER').length, color: 'bg-gray-100 text-gray-700' },
+                  { label: 'Low Stock',   value: allItems.filter((p: any) => { const ci = (p.inventoryItems ?? []).find((i: any) => i.channel === channel) ?? p.inventoryItems?.[0]; return (ci?.quantity ?? 0) <= (ci?.reorderPoint ?? 10) }).length, color: 'bg-amber-100 text-amber-700' },
+                ].map(chip => (
+                  <span key={chip.label} className={cn('rounded-full px-2.5 py-1 font-medium', chip.color)}>
+                    {chip.label}: {chip.value}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div className="rounded-xl border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40">
+                  <tr>{['SKU','Product','Seller Qty','WFS Qty','Total','Type','Status'].map(h =>
+                    <th key={h} className="px-3 py-3 text-left font-medium text-muted-foreground text-xs">{h}</th>
+                  )}</tr>
+                </thead>
+                <tbody>
+                  {!inventoryData ? [...Array(8)].map((_,i) => (
+                    <tr key={i} className="border-t">{[...Array(7)].map((_,j) =>
+                      <td key={j} className="px-3 py-3"><div className="h-4 rounded bg-muted animate-pulse w-16"/></td>
+                    )}</tr>
+                  )) : sorted.length === 0 ? (
+                    <tr><td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
+                      <Package className="h-8 w-8 mx-auto mb-2 opacity-30"/>No items match filters
+                    </td></tr>
+                  ) : sorted.map((product: any) => {
+                    const items = product.inventoryItems ?? []
+                    const ci    = items.find((i: any) => i.channel === channel) ?? items[0]
+                    const qty   = ci?.quantity ?? 0
+                    const reorder = ci?.reorderPoint ?? 10
+                    const low   = qty <= reorder
+                    const meta2 = (product.customFields as any) ?? {}
+                    const sellerQty = meta2.sellerQty ?? 0
+                    const wfsQty    = meta2.wfsQty    ?? 0
+                    const ft  = meta2.fulfillmentType ?? (wfsQty > 0 ? 'WFS' : 'SELLER')
+                    return (
+                      <tr key={product.id} className="border-t hover:bg-muted/20 transition-colors">
+                        <td className="px-3 py-3 font-mono text-xs text-muted-foreground max-w-[120px] truncate">{product.sku}</td>
+                        <td className="px-3 py-3 font-medium max-w-[180px] truncate text-xs">{product.name}</td>
+                        <td className="px-3 py-3 tabular-nums text-xs">{sellerQty.toLocaleString()}</td>
+                        <td className="px-3 py-3 tabular-nums text-xs">{wfsQty.toLocaleString()}</td>
+                        <td className={cn('px-3 py-3 font-bold tabular-nums text-xs', low ? 'text-red-600' : '')}>{qty.toLocaleString()}</td>
+                        <td className="px-3 py-3">
+                          <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium',
+                            ft === 'WFS' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700')}>
+                            {ft === 'WFS' ? 'WFS' : 'Seller'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3">
+                          {low
+                            ? <span className="flex items-center gap-1 text-xs font-medium text-amber-600"><AlertTriangle className="h-3 w-3"/>Low</span>
+                            : <span className="text-xs text-emerald-600 font-medium">OK</span>
+                          }
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
