@@ -259,10 +259,6 @@ export async function walmartRoutes(app: FastifyInstance) {
 
     ;(async () => {
       try {
-        // Reconnect to DB before heavy operations
-        await prisma.$disconnect()
-        await prisma.$connect()
-
         // Delete existing Walmart orders in chunks to avoid connection pressure
         const walmartOrders = await prisma.order.findMany({
           where: { orgId, channel: 'WALMART' },
@@ -280,10 +276,6 @@ export async function walmartRoutes(app: FastifyInstance) {
           }
         }
         app.log.info(`Walmart resync: cleared ${orderIds.length} existing orders for org ${orgId}`)
-
-        // Reconnect again after deletes before the big fetch+insert
-        await prisma.$disconnect()
-        await prisma.$connect()
 
         const orders = await syncOrders(orgId)
         app.log.info(`Walmart resync COMPLETE for ${orgId}: synced=${orders.synced} totalFromWalmart=${orders.totalFromWalmart}`)
