@@ -283,33 +283,212 @@ function ChannelCard({ config, existing, isConnected, tiktokStatus }: any) {
   )
 }
 
+const ALL_ROLES = ['SUPER_ADMIN','ADMIN','MANAGER','FINANCE','MARKETING','SUPPORT','WAREHOUSE','SALES','VIEWER','GUEST'] as const
+const ROLE_COLORS: Record<string,string> = {
+  SUPER_ADMIN: 'bg-red-100 text-red-700', ADMIN: 'bg-orange-100 text-orange-700',
+  MANAGER: 'bg-blue-100 text-blue-700', FINANCE: 'bg-emerald-100 text-emerald-700',
+  MARKETING: 'bg-purple-100 text-purple-700', SUPPORT: 'bg-cyan-100 text-cyan-700',
+  WAREHOUSE: 'bg-amber-100 text-amber-700', SALES: 'bg-pink-100 text-pink-700',
+  VIEWER: 'bg-gray-100 text-gray-700', GUEST: 'bg-gray-100 text-gray-500',
+}
+
 function TeamSettings() {
-  const { data: users } = useQuery({
+  const qc = useQueryClient()
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [inviteForm, setInviteForm] = useState({ name: '', email: '', role: 'VIEWER', password: '' })
+  const [inviting, setInviting] = useState(false)
+  const [createdUser, setCreatedUser] = useState<any>(null)
+  const [editingRole, setEditingRole] = useState<string | null>(null)
+
+  const { data: usersData } = useQuery({
     queryKey: ['users'],
     queryFn: () => api.get('/users').then((r) => r.data.data),
   })
+  const { data: me } = useQuery({
+    queryKey: ['me'],
+    queryFn: () => api.get('/auth/me').then((r) => r.data.data),
+  })
+  const users = usersData ?? []
+  const isSuperAdmin = me?.role === 'SUPER_ADMIN'
+  const isAdmin = me?.role === 'SUPER_ADMIN' || me?.role === 'ADMIN'
+
+  const inviteUser = async () => {
+    if (!inviteForm.name || !inviteForm.email) return toast.error('Name and email required')
+    setInviting(true)
+    try {
+      const { data } = await api.post('/users/invite', inviteForm)
+      setCreatedUser(data.data)
+      toast.success(`${data.data.name} invited! Temp password: ${data.data.tempPassword ?? inviteForm.password}`)
+      qc.invalidateQueries({ queryKey: ['users'] })
+      setInviteForm({ name: '', email: '', role: 'VIEWER', password: '' })
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message ?? 'Failed to invite')
+    } finally { setInviting(false) }
+  }
+
+  const updateRole = async (userId: string, role: string) => {
+    try {
+      await api.patch(`/users/${userId}`, { role })
+      qc.invalidateQueries({ queryKey: ['users'] })
+      setEditingRole(null)
+      toast.success('Role updated')
+    } catch (e: any) { toast.error(e?.response?.data?.message ?? 'Failed') }
+  }
+
+  const toggleActive = async (userId: string, isActive: boolean) => {
+    try {
+      await api.patch(`/users/${userId}`, { isActive })
+      qc.invalidateQueries({ queryKey: ['users'] })
+      toast.success(isActive ? 'User activated' : 'User deactivated')
+    } catch (e: any) { toast.error(e?.response?.data?.message ?? 'Failed') }
+  }
 
   return (
     <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold">Team Members</h3>
+          <p className="text-sm text-muted-foreground">{users.length} member{users.length !== 1 ? 's' : ''} in your organization</p>
+        </div>
+        {isAdmin && (
+          <button onClick={() => setInviteOpen(!inviteOpen)}
+            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90 transition-colors">
+            <Users className="h-4 w-4" /> Invite Member
+          </button>
+        )}
+      </div>
+
+      {/* Invite form */}
+      {inviteOpen && isAdmin && (
+        <div className="rounded-xl border bg-muted/20 p-5 space-y-4">
+          <h4 className="font-medium text-sm">Add Team Member</h4>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Full Name</label>
+              <input value={inviteForm.name} onChange={e => setInviteForm(f => ({...f, name: e.target.value}))}
+                placeholder="John Doe" className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Email</label>
+              <input type="email" value={inviteForm.email} onChange={e => setInviteForm(f => ({...f, email: e.target.value}))}
+                placeholder="john@company.com" className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Role</label>
+              <select value={inviteForm.role} onChange={e => setInviteForm(f => ({...f, role: e.target.value}))}
+                className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary">
+                {ALL_ROLES.filter(r => isSuperAdmin || r !== 'SUPER_ADMIN').map(r => (
+                  <option key={r} value={r}>{r.replace('_',' ')}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Password (leave blank to auto-generate)</label>
+              <input value={inviteForm.password} onChange={e => setInviteForm(f => ({...f, password: e.target.value}))}
+                placeholder="Auto-generated if empty" type="text"
+                className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary" />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={inviteUser} disabled={inviting}
+              className="rounded-lg bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2">
+              {inviting && <Loader2 className="h-3 w-3 animate-spin" />} Add Member
+            </button>
+            <button onClick={() => setInviteOpen(false)} className="rounded-lg border px-4 py-2 text-sm hover:bg-muted">Cancel</button>
+          </div>
+          {createdUser && (
+            <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-800">
+              ✓ <strong>{createdUser.name}</strong> added. Share their login credentials securely.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Users table */}
       <div className="rounded-xl border overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-muted/40">
-            <tr>{['Name', 'Email', 'Role', 'Status', 'Last Login'].map((h) => (
-              <th key={h} className="px-4 py-3 text-left font-medium text-muted-foreground">{h}</th>
+            <tr>{['Member','Email','Role','Status','Last Login','Actions'].map((h) => (
+              <th key={h} className="px-4 py-3 text-left font-medium text-muted-foreground text-xs">{h}</th>
             ))}</tr>
           </thead>
           <tbody>
-            {(users ?? []).map((u: any) => (
-              <tr key={u.id} className="border-t">
-                <td className="px-4 py-3 font-medium">{u.name}</td>
-                <td className="px-4 py-3 text-muted-foreground">{u.email}</td>
-                <td className="px-4 py-3"><span className="rounded-full bg-primary/10 text-primary px-2 py-0.5 text-xs">{u.role}</span></td>
-                <td className="px-4 py-3"><span className={cn('rounded-full px-2 py-0.5 text-xs', u.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800')}>{u.isActive ? 'Active' : 'Inactive'}</span></td>
-                <td className="px-4 py-3 text-muted-foreground">{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : 'Never'}</td>
+            {users.map((u: any) => (
+              <tr key={u.id} className="border-t hover:bg-muted/10">
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
+                      {u.name?.[0]?.toUpperCase()}
+                    </div>
+                    <span className="font-medium">{u.name}</span>
+                    {u.id === me?.id && <span className="text-xs text-muted-foreground">(you)</span>}
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-muted-foreground text-xs">{u.email}</td>
+                <td className="px-4 py-3">
+                  {isAdmin && editingRole === u.id ? (
+                    <select autoFocus defaultValue={u.role}
+                      onChange={e => updateRole(u.id, e.target.value)}
+                      onBlur={() => setEditingRole(null)}
+                      className="rounded-lg border bg-background px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-primary">
+                      {ALL_ROLES.filter(r => isSuperAdmin || r !== 'SUPER_ADMIN').map(r => (
+                        <option key={r} value={r}>{r.replace('_',' ')}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <button onClick={() => isAdmin && u.id !== me?.id && u.role !== 'SUPER_ADMIN' && setEditingRole(u.id)}
+                      className={cn('rounded-full px-2 py-0.5 text-xs font-medium', ROLE_COLORS[u.role] ?? 'bg-gray-100 text-gray-700',
+                        isAdmin && u.id !== me?.id && u.role !== 'SUPER_ADMIN' ? 'cursor-pointer hover:opacity-80' : 'cursor-default')}>
+                      {u.role.replace('_',' ')}
+                      {isAdmin && u.id !== me?.id && u.role !== 'SUPER_ADMIN' && <span className="ml-1 opacity-50">▾</span>}
+                    </button>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <span className={cn('rounded-full px-2 py-0.5 text-xs', u.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800')}>
+                    {u.isActive ? 'Active' : 'Inactive'}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-muted-foreground text-xs">
+                  {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : 'Never'}
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-1">
+                    {/* Chat button */}
+                    {u.id !== me?.id && (
+                      <a href={`/chat?dm=${u.id}`}
+                        className="rounded-lg border px-2 py-1 text-xs hover:bg-muted transition-colors flex items-center gap-1">
+                        💬 Chat
+                      </a>
+                    )}
+                    {/* Enable/Disable */}
+                    {isAdmin && u.id !== me?.id && u.role !== 'SUPER_ADMIN' && (
+                      <button onClick={() => toggleActive(u.id, !u.isActive)}
+                        className={cn('rounded-lg border px-2 py-1 text-xs transition-colors',
+                          u.isActive ? 'hover:bg-red-50 hover:text-red-600 hover:border-red-200' : 'hover:bg-green-50 hover:text-green-600 hover:border-green-200')}>
+                        {u.isActive ? 'Disable' : 'Enable'}
+                      </button>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* Role legend */}
+      <div className="rounded-xl border p-4">
+        <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Role Access Levels</p>
+        <div className="grid grid-cols-2 gap-y-1 text-xs text-muted-foreground">
+          <span><span className="font-medium text-red-700">SUPER_ADMIN</span> — Full access, manage users & roles</span>
+          <span><span className="font-medium text-orange-700">ADMIN</span> — Manage team, all data, no billing</span>
+          <span><span className="font-medium text-blue-700">MANAGER</span> — Orders, inventory, CRM, reports</span>
+          <span><span className="font-medium text-emerald-700">FINANCE</span> — Financial data, orders, read-only</span>
+          <span><span className="font-medium text-purple-700">MARKETING</span> — CRM, campaigns, analytics</span>
+          <span><span className="font-medium text-gray-700">VIEWER</span> — Read-only access to all sections</span>
+        </div>
       </div>
     </div>
   )
