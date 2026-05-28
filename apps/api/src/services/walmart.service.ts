@@ -127,9 +127,12 @@ function parseLineTotal(line: any): { unitPrice: number; qty: number; total: num
 
 // ── Sync orders (SellerFulfilled + WFS, 180 days) ────
 export async function syncOrders(orgId: string) {
+  console.log(`[syncOrders] START for org ${orgId}`)
   const { config, creds } = await getChannelCreds(orgId)
+  console.log(`[syncOrders] Got creds, fetching from Walmart API...`)
   const { clientId, clientSecret } = creds
   const createdStartDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString()
+  console.log(`[syncOrders] Date range start: ${createdStartDate}`)
 
   // Fetch both fulfillment types in parallel
   const [sellerResult, wfsResult] = await Promise.allSettled([
@@ -140,6 +143,8 @@ export async function syncOrders(orgId: string) {
   // Walmart API sends one entry PER ORDER LINE (not per purchase order).
   // Multiple lines in one order = same purchaseOrderId, different orderLine entries.
   // We MERGE lines into one order instead of overwriting.
+  console.log(`[syncOrders] Walmart fetch done. SellerFulfilled: ${sellerResult.status === 'fulfilled' ? sellerResult.value.length : 'FAILED: ' + (sellerResult as any).reason?.message} | WalmartFulfilled: ${wfsResult.status === 'fulfilled' ? wfsResult.value.length : 'FAILED: ' + (wfsResult as any).reason?.message}`)
+
   const allOrdersMap = new Map<string, any>()
 
   for (const result of [sellerResult, wfsResult]) {
@@ -175,8 +180,10 @@ export async function syncOrders(orgId: string) {
     })).map(o => o.channelOrderId)
   )
 
+  console.log(`[syncOrders] Total from Walmart: ${allOrders.length} | Already in DB: ${existingIds.size}`)
   // Only process new orders
   const newOrders = allOrders.filter(o => !existingIds.has(o.purchaseOrderId))
+  console.log(`[syncOrders] New orders to insert: ${newOrders.length}`)
 
   if (newOrders.length === 0) {
     await prisma.channelConfig.update({
@@ -221,6 +228,7 @@ export async function syncOrders(orgId: string) {
   // Bulk insert all orders at once (skipDuplicates for safety)
   await prisma.order.createMany({ data: orderRows, skipDuplicates: true })
 
+  console.log(`[syncOrders] createMany orders done, loading IDs...`)
   // Now load the created orders to get their IDs, then bulk insert items
   const createdOrders = await prisma.order.findMany({
     where: {
@@ -263,6 +271,7 @@ export async function syncOrders(orgId: string) {
     data: { lastSyncAt: new Date(), lastSyncStatus: 'SUCCESS' },
   })
 
+  console.log(`[syncOrders] COMPLETE. synced=${newOrders.length} totalFromWalmart=${allOrders.length}`)
   return { synced: newOrders.length, totalFromWalmart: allOrders.length }
 }
 
