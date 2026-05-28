@@ -442,4 +442,55 @@ export async function walmartRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: { sku, results } })
   })
 
+  // GET /walmart/wfs-orders-test — test WFS orders endpoint
+  app.get('/wfs-orders-test', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const c = await prisma.channelConfig.findFirst({
+      where: { orgId: req.user.orgId, channel: 'WALMART', status: 'CONNECTED' },
+    })
+    if (!c) return reply.code(400).send({ success: false })
+    const { clientId, clientSecret } = c.credentials as any
+
+    const axios = (await import('axios')).default
+    const { randomUUID } = await import('crypto')
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
+    const tokenRes = await axios.post(
+      'https://marketplace.walmartapis.com/v3/token',
+      new URLSearchParams({ grant_type: 'client_credentials' }),
+      { headers: { Authorization: `Basic ${credentials}`, 'WM_SVC.NAME': 'SVA', 'WM_QOS.CORRELATION_ID': randomUUID(), 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, timeout: 10000 }
+    )
+    const token = tokenRes.data.access_token
+    const headers = { 'WM_SEC.ACCESS_TOKEN': token, 'WM_SVC.NAME': 'SVA', 'WM_QOS.CORRELATION_ID': randomUUID(), 'WM_CONSUMER.CHANNEL.TYPE': '0f3e4dd4-0514-4346-b39d-af0e00ea066d', Accept: 'application/json' }
+    const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    const results: any = {}
+
+    // Test 1: shipNodeType=WFSFulfilled on standard orders endpoint
+    try {
+      const r = await Promise.race([
+        axios.get('https://marketplace.walmartapis.com/v3/orders', {
+          headers: { ...headers, 'WM_QOS.CORRELATION_ID': randomUUID() },
+          params: { createdStartDate: since30, limit: 5, shipNodeType: 'WFSFulfilled' },
+          timeout: 20000,
+        }),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout 20s')), 20000))
+      ])
+      results.wfsFulfilled_orders = { totalCount: (r as any).data?.list?.meta?.totalCount, returned: (r as any).data?.list?.elements?.order?.length ?? 0 }
+    } catch (e: any) { results.wfsFulfilled_orders_error = e.message }
+
+    // Test 2: fulfillment/orders endpoint
+    try {
+      const r = await Promise.race([
+        axios.get('https://marketplace.walmartapis.com/v3/fulfillment/orders', {
+          headers: { ...headers, 'WM_QOS.CORRELATION_ID': randomUUID() },
+          params: { createdStartDate: since30, limit: 5 },
+          timeout: 20000,
+        }),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout 20s')), 20000))
+      ])
+      results.fulfillment_orders = { status: (r as any).status, data: (r as any).data }
+    } catch (e: any) { results.fulfillment_orders_error = e.message }
+
+    return reply.send({ success: true, data: results })
+  })
+
 }
