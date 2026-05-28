@@ -53,8 +53,15 @@ export async function orderRoutes(app: FastifyInstance) {
     const orgId = req.user.orgId
     const since = new Date(Date.now() - parseInt(days) * 24 * 60 * 60 * 1000)
 
-    const where: any = { orgId, orderedAt: { gte: since } }
+    // Support custom date range (startDate/endDate) OR days-based range
+    const { startDate, endDate } = req.query as any
+    let where: any = { orgId }
     if (channel) where.channel = channel
+    if (startDate && endDate) {
+      where.orderedAt = { gte: new Date(startDate), lte: new Date(endDate) }
+    } else {
+      where.orderedAt = { gte: since }
+    }
 
     const [agg, orders, allTime] = await Promise.all([
       prisma.order.aggregate({

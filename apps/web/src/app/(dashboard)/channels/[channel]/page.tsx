@@ -3,112 +3,195 @@ export const dynamic = 'force-dynamic'
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { formatCurrency, formatNumber, cn, CHANNEL_COLORS, STATUS_COLORS } from '@/lib/utils'
+import { formatCurrency, formatNumber, cn, STATUS_COLORS } from '@/lib/utils'
 import { useParams, useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { toast } from 'sonner'
 import {
   RefreshCw, TrendingUp, ShoppingCart, Package, Clock,
   ArrowLeft, Loader2, ChevronRight, AlertTriangle, X, MapPin,
+  Calendar, ChevronLeft, ChevronDown,
 } from 'lucide-react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, BarChart, Bar,
 } from 'recharts'
-import { format } from 'date-fns'
+import { format, subDays, startOfDay, endOfDay, startOfMonth, endOfMonth, subMonths } from 'date-fns'
 
-// ── Channel metadata ───────────────────────────────────
 const CHANNEL_META: Record<string, { label: string; logo: string; color: string }> = {
-  WALMART:      { label: 'Walmart',          logo: 'W', color: '#007DC6' },
-  AMAZON_US:    { label: 'Amazon US',        logo: 'A', color: '#FF9900' },
-  AMAZON_IN:    { label: 'Amazon India',     logo: 'A', color: '#FF9900' },
-  AMAZON_AE:    { label: 'Amazon UAE',       logo: 'A', color: '#FF9900' },
-  AMAZON_UK:    { label: 'Amazon UK',        logo: 'A', color: '#FF9900' },
-  AMAZON_AU:    { label: 'Amazon Australia', logo: 'A', color: '#FF9900' },
-  TIKTOK_SHOP:  { label: 'TikTok Shop',      logo: 'T', color: '#FE2C55' },
-  SHOPIFY:      { label: 'Shopify',          logo: 'S', color: '#96BF48' },
-  MYNTRA:       { label: 'Myntra',           logo: 'M', color: '#FF3F6C' },
-  FLIPKART:     { label: 'Flipkart',         logo: 'F', color: '#2874F0' },
+  WALMART:     { label: 'Walmart',          logo: 'W', color: '#007DC6' },
+  AMAZON_US:   { label: 'Amazon US',        logo: 'A', color: '#FF9900' },
+  AMAZON_IN:   { label: 'Amazon India',     logo: 'A', color: '#FF9900' },
+  AMAZON_AE:   { label: 'Amazon UAE',       logo: 'A', color: '#FF9900' },
+  AMAZON_UK:   { label: 'Amazon UK',        logo: 'A', color: '#FF9900' },
+  AMAZON_AU:   { label: 'Amazon Australia', logo: 'A', color: '#FF9900' },
+  TIKTOK_SHOP: { label: 'TikTok Shop',      logo: 'T', color: '#FE2C55' },
+  SHOPIFY:     { label: 'Shopify',          logo: 'S', color: '#96BF48' },
+  MYNTRA:      { label: 'Myntra',           logo: 'M', color: '#FF3F6C' },
+  FLIPKART:    { label: 'Flipkart',         logo: 'F', color: '#2874F0' },
 }
 
 const SYNC_ROUTES: Record<string, string> = {
-  WALMART:      '/walmart/sync',
-  TIKTOK_SHOP:  '/tiktok/sync',
-  AMAZON_US:    '/amazon/AMAZON_US/sync', AMAZON_IN: '/amazon/AMAZON_IN/sync',
-  AMAZON_AE:    '/amazon/AMAZON_AE/sync', AMAZON_UK: '/amazon/AMAZON_UK/sync',
-  AMAZON_AU:    '/amazon/AMAZON_AU/sync',
+  WALMART: '/walmart/sync', TIKTOK_SHOP: '/tiktok/sync',
+  AMAZON_US: '/amazon/AMAZON_US/sync', AMAZON_IN: '/amazon/AMAZON_IN/sync',
+  AMAZON_AE: '/amazon/AMAZON_AE/sync', AMAZON_UK: '/amazon/AMAZON_UK/sync',
+  AMAZON_AU: '/amazon/AMAZON_AU/sync',
 }
 
+// ── Date range presets ────────────────────────────────
+const PRESETS = [
+  { label: 'Today',         getRange: () => ({ start: startOfDay(new Date()), end: endOfDay(new Date()) }) },
+  { label: 'Yesterday',     getRange: () => ({ start: startOfDay(subDays(new Date(), 1)), end: endOfDay(subDays(new Date(), 1)) }) },
+  { label: 'Last 7 days',   getRange: () => ({ start: startOfDay(subDays(new Date(), 6)), end: endOfDay(new Date()) }) },
+  { label: 'Last 30 days',  getRange: () => ({ start: startOfDay(subDays(new Date(), 29)), end: endOfDay(new Date()) }) },
+  { label: 'This month',    getRange: () => ({ start: startOfMonth(new Date()), end: endOfDay(new Date()) }) },
+  { label: 'Last month',    getRange: () => ({ start: startOfMonth(subMonths(new Date(), 1)), end: endOfMonth(subMonths(new Date(), 1)) }) },
+  { label: 'Last 90 days',  getRange: () => ({ start: startOfDay(subDays(new Date(), 89)), end: endOfDay(new Date()) }) },
+  { label: 'Last 180 days', getRange: () => ({ start: startOfDay(subDays(new Date(), 179)), end: endOfDay(new Date()) }) },
+]
+
 const FULFILLMENT_COLORS: Record<string, string> = {
-  UNFULFILLED: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+  UNFULFILLED: 'bg-gray-100 text-gray-700',
   PARTIAL:     'bg-amber-100 text-amber-700',
   FULFILLED:   'bg-emerald-100 text-emerald-700',
 }
 
-const PERIODS = [
-  { label: '7d',  days: 7 },
-  { label: '30d', days: 30 },
-  { label: '90d', days: 90 },
-  { label: '180d', days: 180 },
-]
+function DateRangePicker({ start, end, onChange }: { start: Date; end: Date; onChange: (s: Date, e: Date) => void }) {
+  const [open, setOpen] = useState(false)
+  const [tempStart, setTempStart] = useState('')
+  const [tempEnd, setTempEnd] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const label = start.toDateString() === end.toDateString()
+    ? format(start, 'MMM d, yyyy')
+    : `${format(start, 'MMM d, yyyy')} – ${format(end, 'MMM d, yyyy')}`
+
+  const applyCustom = () => {
+    if (tempStart && tempEnd) {
+      onChange(new Date(tempStart), endOfDay(new Date(tempEnd)))
+      setOpen(false)
+    }
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <button onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 rounded-lg border bg-background px-4 py-2 text-sm font-medium hover:bg-muted transition-colors">
+        <Calendar className="h-4 w-4 text-muted-foreground" />
+        {label}
+        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 w-[340px] rounded-xl border bg-background shadow-xl p-4 space-y-3">
+          {/* Presets */}
+          <div className="grid grid-cols-2 gap-1.5">
+            {PRESETS.map(p => {
+              const r = p.getRange()
+              const active = r.start.toDateString() === start.toDateString() && r.end.toDateString() === end.toDateString()
+              return (
+                <button key={p.label} onClick={() => { onChange(r.start, r.end); setOpen(false) }}
+                  className={cn('rounded-lg px-3 py-2 text-xs font-medium text-left transition-colors',
+                    active ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground hover:text-foreground'
+                  )}>
+                  {p.label}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="border-t pt-3 space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Custom range</p>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">From</p>
+                <input type="date" value={tempStart || format(start, 'yyyy-MM-dd')}
+                  onChange={e => setTempStart(e.target.value)}
+                  className="w-full rounded-lg border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-primary" />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">To</p>
+                <input type="date" value={tempEnd || format(end, 'yyyy-MM-dd')}
+                  onChange={e => setTempEnd(e.target.value)}
+                  className="w-full rounded-lg border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-primary" />
+              </div>
+            </div>
+            <button onClick={applyCustom}
+              className="w-full rounded-lg bg-primary text-primary-foreground py-2 text-sm font-medium hover:bg-primary/90 transition-colors">
+              Apply
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function ChannelPage() {
   const params  = useParams()
   const router  = useRouter()
   const channel = (params.channel as string).toUpperCase()
   const meta    = CHANNEL_META[channel] ?? { label: channel, logo: channel[0], color: '#6B7280' }
+  const qc      = useQueryClient()
 
-  const [tab, setTab]         = useState<'overview' | 'orders' | 'inventory'>('overview')
-  const [period, setPeriod]   = useState(30)
+  const [tab, setTab]       = useState<'overview' | 'orders' | 'inventory'>('overview')
   const [syncing, setSyncing] = useState(false)
   const [selected, setSelected] = useState<any>(null)
   const [search, setSearch]     = useState('')
   const [statusFilter, setStatusFilter] = useState('')
-  const [orderPage, setOrderPage]       = useState(1)
-  const qc = useQueryClient()
+  const [orderPage, setOrderPage] = useState(1)
 
-  // ── Channel config ────────────────────────────────
-  const { data: channelConfig } = useQuery({
-    queryKey: ['channel-config', channel],
-    queryFn: () => api.get('/channels').then(r =>
-      (r.data.data as any[]).find(c => c.channel === channel) ?? null
-    ),
+  // Date range state — default last 30 days
+  const [dateRange, setDateRange] = useState({
+    start: startOfDay(subDays(new Date(), 29)),
+    end:   endOfDay(new Date()),
   })
 
-  // ── Server-side stats (accurate, date-filtered) ──
+  const { data: channelConfig } = useQuery({
+    queryKey: ['channel-config', channel],
+    queryFn: () => api.get('/channels').then(r => (r.data.data as any[]).find(c => c.channel === channel) ?? null),
+  })
+
+  // Stats using exact date range
   const { data: statsData, isLoading: statsLoading } = useQuery({
-    queryKey: ['channel-stats', channel, period],
-    queryFn: () => api.get(`/orders/stats?channel=${channel}&days=${period}`).then(r => r.data.data),
+    queryKey: ['channel-stats', channel, dateRange.start.toISOString(), dateRange.end.toISOString()],
+    queryFn: () => api.get(`/orders/stats?channel=${channel}&startDate=${dateRange.start.toISOString()}&endDate=${dateRange.end.toISOString()}`).then(r => r.data.data),
     staleTime: 60_000,
   })
 
-  // ── Paginated orders for table ────────────────────
+  // Orders table
   const { data: pagedOrders, isLoading: ordersLoading } = useQuery({
-    queryKey: ['channel-orders', channel, orderPage, search, statusFilter],
+    queryKey: ['channel-orders', channel, orderPage, search, statusFilter, dateRange.start.toISOString(), dateRange.end.toISOString()],
     queryFn: () => {
       const p = new URLSearchParams({ channel, limit: '50', page: String(orderPage) })
       if (search) p.set('search', search)
       if (statusFilter) p.set('status', statusFilter)
+      // Date filter for orders table
+      p.set('startDate', dateRange.start.toISOString())
+      p.set('endDate', dateRange.end.toISOString())
       return api.get(`/orders?${p}`).then(r => r.data)
     },
     enabled: tab === 'orders',
   })
 
-  // ── Order detail ──────────────────────────────────
   const { data: orderDetail } = useQuery({
     queryKey: ['order-detail', selected?.id],
     queryFn: () => api.get(`/orders/${selected.id}`).then(r => r.data.data),
     enabled: !!selected?.id,
   })
 
-  // ── Inventory ─────────────────────────────────────
   const { data: inventoryData } = useQuery({
     queryKey: ['channel-inventory', channel],
     queryFn: () => api.get('/inventory/products').then(r => r.data.data),
     enabled: tab === 'inventory',
   })
 
-  // ── Sync ──────────────────────────────────────────
   const handleSync = async () => {
     setSyncing(true)
     try {
@@ -116,11 +199,9 @@ export default function ChannelPage() {
       if (!route) { toast.error('Sync not supported for this channel'); return }
       const { data } = await api.post(route)
       const orders = data.data?.orders?.synced ?? data.data?.synced ?? 0
-      const inv    = data.data?.inventory?.synced ?? data.data?.products?.synced ?? 0
-      toast.success(`Synced ${orders} new orders & ${inv} products`)
+      toast.success(`Sync started — ${orders} new orders`)
       qc.invalidateQueries({ queryKey: ['channel-stats', channel] })
       qc.invalidateQueries({ queryKey: ['channel-orders', channel] })
-      qc.invalidateQueries({ queryKey: ['channel-config', channel] })
     } catch (e: any) {
       toast.error(e?.response?.data?.message ?? 'Sync failed')
     } finally {
@@ -128,13 +209,14 @@ export default function ChannelPage() {
     }
   }
 
-  const isConnected = channelConfig?.status === 'CONNECTED'
   const stats = statsData
+  const isConnected = channelConfig?.status === 'CONNECTED'
+  const daysDiff = Math.ceil((dateRange.end.getTime() - dateRange.start.getTime()) / 86400000)
 
   return (
     <div className="space-y-5">
-      {/* ── Header ──────────────────────────────────── */}
-      <div className="flex items-center gap-4">
+      {/* Header */}
+      <div className="flex items-center gap-4 flex-wrap">
         <button onClick={() => router.back()} className="rounded-lg p-1.5 hover:bg-muted transition-colors">
           <ArrowLeft className="h-4 w-4" />
         </button>
@@ -155,7 +237,13 @@ export default function ChannelPage() {
             </p>
           </div>
         </div>
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
+          {/* Date range picker */}
+          <DateRangePicker
+            start={dateRange.start}
+            end={dateRange.end}
+            onChange={(s, e) => setDateRange({ start: s, end: e })}
+          />
           {isConnected && (
             <button onClick={handleSync} disabled={syncing}
               className="flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50 transition-colors">
@@ -166,80 +254,63 @@ export default function ChannelPage() {
         </div>
       </div>
 
-      {/* ── Tabs ────────────────────────────────────── */}
-      <div className="flex items-center gap-4">
-        <div className="flex gap-1 rounded-lg border bg-muted/40 p-1 w-fit">
-          {(['overview', 'orders', 'inventory'] as const).map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              className={cn('rounded-md px-4 py-1.5 text-sm font-medium capitalize transition-colors',
-                tab === t ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              )}>
-              {t}
-              {t === 'orders' && stats && (
-                <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-xs">
-                  {(pagedOrders?.total ?? stats.allTime.orderCount).toLocaleString()}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* Period selector — only on Overview */}
-        {tab === 'overview' && (
-          <div className="flex gap-1 rounded-lg border bg-muted/40 p-1">
-            {PERIODS.map(p => (
-              <button key={p.days} onClick={() => setPeriod(p.days)}
-                className={cn('rounded-md px-3 py-1 text-xs font-medium transition-colors',
-                  period === p.days ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                )}>
-                {p.label}
-              </button>
-            ))}
-          </div>
-        )}
+      {/* Tabs */}
+      <div className="flex gap-1 rounded-lg border bg-muted/40 p-1 w-fit">
+        {(['overview', 'orders', 'inventory'] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className={cn('rounded-md px-4 py-1.5 text-sm font-medium capitalize transition-colors',
+              tab === t ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
+            )}>
+            {t}
+            {t === 'orders' && stats && (
+              <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-xs">
+                {stats.allTime?.orderCount?.toLocaleString()}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
-      {/* ── Overview tab ────────────────────────────── */}
+      {/* Overview */}
       {tab === 'overview' && (
         <div className="space-y-5">
           {/* KPI cards */}
           <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
             {[
               {
-                label: `Revenue (${period}d)`,
+                label: `Revenue (${daysDiff}d)`,
                 value: statsLoading ? null : formatCurrency(stats?.revenue ?? 0),
-                sub: statsLoading ? null : `${formatNumber(stats?.orderCount ?? 0)} orders`,
+                sub:   statsLoading ? null : `${formatNumber(stats?.orderCount ?? 0)} orders`,
                 icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/30'
               },
               {
-                label: `Units Sold (${period}d)`,
+                label: `Units Sold (${daysDiff}d)`,
                 value: statsLoading ? null : formatNumber(stats?.totalUnits ?? stats?.orderCount ?? 0),
-                sub: statsLoading ? null : `${formatNumber(stats?.orderCount ?? 0)} orders`,
+                sub:   statsLoading ? null : `${formatNumber(stats?.orderCount ?? 0)} orders`,
                 icon: Package, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/30'
               },
               {
                 label: 'Avg Order Value',
                 value: statsLoading ? null : formatCurrency(stats?.aov ?? 0),
-                sub: 'per order',
+                sub:   'per order',
                 icon: TrendingUp, color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/30'
               },
               {
                 label: 'Pending Orders',
                 value: statsLoading ? null : String(stats?.pending ?? 0),
-                sub: 'need action',
+                sub:   'need action',
                 icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-950/30',
-                alert: (stats?.pending ?? 0) > 0
+                alert: (stats?.pending ?? 0) > 0,
               },
             ].map(card => (
               <div key={card.label} className={cn('rounded-xl border p-5', card.alert && 'border-amber-300')}>
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">{card.label}</p>
-                    {card.value === null ? (
-                      <div className="mt-1 h-8 w-24 rounded bg-muted animate-pulse" />
-                    ) : (
-                      <p className="mt-1 text-2xl font-bold">{card.value}</p>
-                    )}
+                    {card.value === null
+                      ? <div className="mt-1 h-8 w-24 rounded bg-muted animate-pulse" />
+                      : <p className="mt-1 text-2xl font-bold">{card.value}</p>
+                    }
                     {card.sub && <p className="text-xs text-muted-foreground mt-0.5">{card.sub}</p>}
                   </div>
                   <div className={cn('rounded-xl p-2.5', card.bg)}>
@@ -250,31 +321,30 @@ export default function ChannelPage() {
             ))}
           </div>
 
-          {/* All-time summary strip */}
+          {/* All-time strip */}
           {stats && (
             <div className="rounded-xl border bg-muted/30 px-5 py-3 flex items-center gap-6 text-sm flex-wrap">
               <span className="text-muted-foreground font-medium">All Time:</span>
-              <span><strong>{formatCurrency(stats.allTime.revenue)}</strong> revenue</span>
-              <span><strong>{formatNumber(stats.allTime.orderCount)}</strong> orders</span>
-              {stats.totalUnits > 0 && <span><strong>{formatNumber(stats.totalUnits)}</strong> units sold</span>}
-              <span className="text-xs text-muted-foreground ml-auto">Showing last {period} days above ↑</span>
+              <span><strong>{formatCurrency(stats.allTime?.revenue ?? 0)}</strong> revenue</span>
+              <span><strong>{formatNumber(stats.allTime?.orderCount ?? 0)}</strong> orders</span>
+              <span className="text-xs text-muted-foreground ml-auto">
+                Showing {format(dateRange.start, 'MMM d')} – {format(dateRange.end, 'MMM d, yyyy')} above ↑
+              </span>
             </div>
           )}
 
-          {/* Revenue chart + Top SKUs */}
+          {/* Chart + Top Products */}
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
             <div className="xl:col-span-2 rounded-xl border p-5">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-semibold">Revenue Trend (last {period} days)</h2>
+                <h2 className="text-sm font-semibold">
+                  Revenue — {format(dateRange.start, 'MMM d')} to {format(dateRange.end, 'MMM d, yyyy')}
+                </h2>
                 <span className="rounded-full px-2.5 py-0.5 text-xs font-medium text-white"
-                  style={{ backgroundColor: meta.color }}>
-                  {meta.label}
-                </span>
+                  style={{ backgroundColor: meta.color }}>{meta.label}</span>
               </div>
               {statsLoading ? (
-                <div className="h-56 flex items-center justify-center">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                </div>
+                <div className="h-56 flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
               ) : (stats?.chart ?? []).length > 0 ? (
                 <div className="h-56">
                   <ResponsiveContainer width="100%" height="100%">
@@ -287,37 +357,23 @@ export default function ChannelPage() {
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="date" tick={{ fontSize: 10 }}
-                        tickFormatter={d => {
-                          const [, m, day] = d.split('-')
-                          return `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m)-1]} ${parseInt(day)}`
-                        }} />
+                        tickFormatter={d => { const [,m,day] = d.split('-'); return `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m)-1]} ${parseInt(day)}` }} />
                       <YAxis tickFormatter={v => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
                       <Tooltip formatter={(v: number) => [formatCurrency(v), 'Revenue']}
-                        labelFormatter={d => {
-                          const [y, m, day] = d.split('-')
-                          return `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m)-1]} ${parseInt(day)}, ${y}`
-                        }} />
-                      <Area type="monotone" dataKey="total" stroke={meta.color} strokeWidth={2}
-                        fill={`url(#grad-${channel})`} />
+                        labelFormatter={d => { const [y,m,day]=d.split('-'); return `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m)-1]} ${parseInt(day)}, ${y}` }} />
+                      <Area type="monotone" dataKey="total" stroke={meta.color} strokeWidth={2} fill={`url(#grad-${channel})`} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
               ) : (
-                <div className="h-56 flex items-center justify-center text-sm text-muted-foreground">
-                  No orders in this period — try a longer range or sync
-                </div>
+                <div className="h-56 flex items-center justify-center text-sm text-muted-foreground">No orders in this period</div>
               )}
             </div>
 
-            {/* Top SKUs */}
             <div className="rounded-xl border p-5">
               <h2 className="text-sm font-semibold mb-4">Top Products by Revenue</h2>
               {statsLoading ? (
-                <div className="space-y-3">
-                  {[...Array(6)].map((_, i) => (
-                    <div key={i} className="h-8 rounded bg-muted animate-pulse" />
-                  ))}
-                </div>
+                <div className="space-y-3">{[...Array(6)].map((_,i) => <div key={i} className="h-8 rounded bg-muted animate-pulse" />)}</div>
               ) : (stats?.topSkus ?? []).length > 0 ? (
                 <div className="space-y-3">
                   {stats!.topSkus.map((sku: any, i: number) => (
@@ -335,18 +391,16 @@ export default function ChannelPage() {
                   ))}
                 </div>
               ) : (
-                <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">
-                  No data in this period
-                </div>
+                <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">No data in this period</div>
               )}
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Orders tab ──────────────────────────────── */}
+      {/* Orders tab */}
       {tab === 'orders' && (
-        <div className="flex gap-5 h-full">
+        <div className="flex gap-5">
           <div className={cn('flex-1 space-y-4 min-w-0', selected && 'hidden xl:block')}>
             <div className="flex flex-wrap items-center gap-2">
               <input value={search} onChange={e => { setSearch(e.target.value); setOrderPage(1) }}
@@ -355,94 +409,62 @@ export default function ChannelPage() {
               <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setOrderPage(1) }}
                 className="rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary">
                 <option value="">All Statuses</option>
-                {['PENDING','PROCESSING','SHIPPED','DELIVERED','COMPLETED','CANCELLED'].map(s =>
-                  <option key={s} value={s}>{s}</option>
-                )}
+                {['PENDING','PROCESSING','SHIPPED','DELIVERED','COMPLETED','CANCELLED'].map(s => <option key={s} value={s}>{s}</option>)}
               </select>
               <span className="ml-auto text-sm text-muted-foreground">
-                {pagedOrders?.total?.toLocaleString() ?? '…'} total orders
+                {pagedOrders?.total?.toLocaleString() ?? '…'} orders in period
               </span>
             </div>
 
             <div className="rounded-xl border overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-muted/40">
-                  <tr>
-                    {['Order #', 'Status', 'Fulfillment', 'Total', 'Date', ''].map(h => (
-                      <th key={h} className="px-4 py-3 text-left font-medium text-muted-foreground">{h}</th>
-                    ))}
-                  </tr>
+                  <tr>{['Order #','Status','Fulfillment','Total','Date',''].map(h =>
+                    <th key={h} className="px-4 py-3 text-left font-medium text-muted-foreground">{h}</th>
+                  )}</tr>
                 </thead>
                 <tbody>
-                  {ordersLoading ? (
-                    [...Array(10)].map((_, i) => (
-                      <tr key={i} className="border-t">
-                        {[...Array(6)].map((_, j) => (
-                          <td key={j} className="px-4 py-3"><div className="h-4 rounded bg-muted animate-pulse w-20" /></td>
-                        ))}
-                      </tr>
-                    ))
-                  ) : (pagedOrders?.data ?? []).length === 0 ? (
+                  {ordersLoading ? [...Array(8)].map((_,i) => (
+                    <tr key={i} className="border-t">{[...Array(6)].map((_,j) =>
+                      <td key={j} className="px-4 py-3"><div className="h-4 rounded bg-muted animate-pulse w-20"/></td>
+                    )}</tr>
+                  )) : (pagedOrders?.data ?? []).length === 0 ? (
                     <tr><td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
-                      <Package className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                      No orders found
+                      <Package className="h-8 w-8 mx-auto mb-2 opacity-30"/>No orders in this period
                     </td></tr>
-                  ) : (
-                    (pagedOrders?.data ?? []).map((order: any) => (
-                      <tr key={order.id} onClick={() => setSelected(order)}
-                        className={cn('border-t hover:bg-muted/20 cursor-pointer transition-colors',
-                          selected?.id === order.id && 'bg-muted/30')}>
-                        <td className="px-4 py-3 font-medium text-primary">{order.orderNumber}</td>
-                        <td className="px-4 py-3">
-                          <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium',
-                            STATUS_COLORS[order.status] ?? 'bg-gray-100 text-gray-700')}>
-                            {order.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={cn('rounded-full px-2 py-0.5 text-xs',
-                            FULFILLMENT_COLORS[order.fulfillmentStatus] ?? 'bg-gray-100 text-gray-700')}>
-                            {order.fulfillmentStatus ?? '—'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 font-medium tabular-nums">
-                          {formatCurrency(Number(order.total), order.currency)}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground text-xs">
-                          {format(new Date(order.orderedAt), 'MMM d, yyyy h:mm a')}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">
-                          <ChevronRight className="h-4 w-4" />
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  ) : (pagedOrders?.data ?? []).map((order: any) => (
+                    <tr key={order.id} onClick={() => setSelected(order)}
+                      className={cn('border-t hover:bg-muted/20 cursor-pointer transition-colors', selected?.id === order.id && 'bg-muted/30')}>
+                      <td className="px-4 py-3 font-medium text-primary">{order.orderNumber}</td>
+                      <td className="px-4 py-3">
+                        <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', STATUS_COLORS[order.status] ?? 'bg-gray-100 text-gray-700')}>{order.status}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={cn('rounded-full px-2 py-0.5 text-xs', FULFILLMENT_COLORS[order.fulfillmentStatus] ?? 'bg-gray-100 text-gray-700')}>{order.fulfillmentStatus ?? '—'}</span>
+                      </td>
+                      <td className="px-4 py-3 font-medium tabular-nums">{formatCurrency(Number(order.total), order.currency)}</td>
+                      <td className="px-4 py-3 text-muted-foreground text-xs">{format(new Date(order.orderedAt), 'MMM d, yyyy h:mm a')}</td>
+                      <td className="px-4 py-3 text-muted-foreground"><ChevronRight className="h-4 w-4"/></td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
 
             {pagedOrders?.totalPages > 1 && (
               <div className="flex items-center justify-center gap-2">
-                <button disabled={orderPage === 1} onClick={() => setOrderPage(p => p - 1)}
-                  className="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-muted">Prev</button>
+                <button disabled={orderPage === 1} onClick={() => setOrderPage(p => p-1)} className="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-muted">Prev</button>
                 <span className="text-sm text-muted-foreground">Page {orderPage} of {pagedOrders.totalPages}</span>
-                <button disabled={orderPage === pagedOrders.totalPages} onClick={() => setOrderPage(p => p + 1)}
-                  className="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-muted">Next</button>
+                <button disabled={orderPage === pagedOrders.totalPages} onClick={() => setOrderPage(p => p+1)} className="rounded-lg border px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-muted">Next</button>
               </div>
             )}
           </div>
 
-          {/* Order detail panel */}
           {selected && (
             <div className="w-full xl:w-[400px] shrink-0 rounded-xl border bg-background flex flex-col overflow-hidden">
               <div className="flex items-center justify-between border-b px-5 py-4">
-                <div>
-                  <p className="font-semibold">{selected.orderNumber}</p>
-                  <p className="text-xs text-muted-foreground">{meta.label}</p>
-                </div>
-                <button onClick={() => setSelected(null)} className="rounded-lg p-1.5 hover:bg-muted">
-                  <X className="h-4 w-4" />
-                </button>
+                <div><p className="font-semibold">{selected.orderNumber}</p><p className="text-xs text-muted-foreground">{meta.label}</p></div>
+                <button onClick={() => setSelected(null)} className="rounded-lg p-1.5 hover:bg-muted"><X className="h-4 w-4"/></button>
               </div>
               <div className="flex-1 overflow-y-auto p-5 space-y-4">
                 <div className="grid grid-cols-2 gap-3 text-sm">
@@ -464,14 +486,12 @@ export default function ChannelPage() {
                   return (
                     <div className="rounded-lg border p-4 space-y-1">
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                        <MapPin className="h-3 w-3" />Ship To
+                        <MapPin className="h-3 w-3"/>Ship To
                       </p>
                       <div className="text-sm text-muted-foreground space-y-0.5">
                         {a.name  && <p className="font-medium text-foreground">{a.name}</p>}
                         {a.line1 && <p>{a.line1}</p>}
-                        {[a.city, a.state, a.zip].filter(Boolean).join(', ') && (
-                          <p>{[a.city, a.state, a.zip].filter(Boolean).join(', ')}</p>
-                        )}
+                        {[a.city, a.state, a.zip].filter(Boolean).join(', ') && <p>{[a.city, a.state, a.zip].filter(Boolean).join(', ')}</p>}
                         {a.country && <p>{a.country}</p>}
                       </div>
                     </div>
@@ -503,65 +523,54 @@ export default function ChannelPage() {
         </div>
       )}
 
-      {/* ── Inventory tab ────────────────────────────── */}
+      {/* Inventory tab */}
       {tab === 'inventory' && (
-        <div className="space-y-4">
-          <div className="rounded-xl border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40">
-                <tr>
-                  {['SKU', 'Product', 'In Stock', 'Reorder Point', 'Status'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left font-medium text-muted-foreground">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {!inventoryData ? (
-                  [...Array(8)].map((_, i) => (
-                    <tr key={i} className="border-t">
-                      {[...Array(5)].map((_, j) => (
-                        <td key={j} className="px-4 py-3">
-                          <div className="h-4 rounded bg-muted animate-pulse w-20" />
-                        </td>
-                      ))}
-                    </tr>
-                  ))
-                ) : inventoryData.length === 0 ? (
-                  <tr><td colSpan={5} className="px-4 py-16 text-center text-muted-foreground">
-                    <Package className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                    No inventory data — sync to import products
-                  </td></tr>
-                ) : (
-                  inventoryData.map((product: any) => {
-                    const items = product.inventoryItems ?? []
-                    const channelItem = items.find((i: any) => i.channel === channel) ?? items[0]
-                    const qty    = channelItem?.quantity ?? 0
-                    const reorder = channelItem?.reorderPoint ?? 10
-                    const low   = qty <= reorder
-                    return (
-                      <tr key={product.id} className="border-t hover:bg-muted/20 transition-colors">
-                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{product.sku}</td>
-                        <td className="px-4 py-3 font-medium max-w-[220px] truncate">{product.name}</td>
-                        <td className={cn('px-4 py-3 font-bold tabular-nums', low ? 'text-red-600' : '')}>
-                          {qty.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">{reorder}</td>
-                        <td className="px-4 py-3">
-                          {low ? (
-                            <span className="flex items-center gap-1 text-xs font-medium text-amber-600">
-                              <AlertTriangle className="h-3 w-3" /> Low Stock
-                            </span>
-                          ) : (
-                            <span className="text-xs text-emerald-600 font-medium">OK</span>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+        <div className="rounded-xl border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40">
+              <tr>{['SKU','Product','In Stock','Fulfillment','Status'].map(h =>
+                <th key={h} className="px-4 py-3 text-left font-medium text-muted-foreground">{h}</th>
+              )}</tr>
+            </thead>
+            <tbody>
+              {!inventoryData ? [...Array(8)].map((_,i) => (
+                <tr key={i} className="border-t">{[...Array(5)].map((_,j) =>
+                  <td key={j} className="px-4 py-3"><div className="h-4 rounded bg-muted animate-pulse w-20"/></td>
+                )}</tr>
+              )) : inventoryData.length === 0 ? (
+                <tr><td colSpan={5} className="px-4 py-16 text-center text-muted-foreground">
+                  <Package className="h-8 w-8 mx-auto mb-2 opacity-30"/>No inventory — sync first
+                </td></tr>
+              ) : inventoryData.map((product: any) => {
+                const items = product.inventoryItems ?? []
+                const channelItem = items.find((i: any) => i.channel === channel) ?? items[0]
+                const qty     = channelItem?.quantity ?? 0
+                const reorder = channelItem?.reorderPoint ?? 10
+                const low     = qty <= reorder
+                const meta2   = (product.customFields as any) ?? {}
+                const fulfillType = meta2.fulfillmentType ?? (meta2.wfsQty > 0 ? 'WFS' : 'SELLER')
+                return (
+                  <tr key={product.id} className="border-t hover:bg-muted/20 transition-colors">
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{product.sku}</td>
+                    <td className="px-4 py-3 font-medium max-w-[200px] truncate">{product.name}</td>
+                    <td className={cn('px-4 py-3 font-bold tabular-nums', low ? 'text-red-600' : '')}>{qty.toLocaleString()}</td>
+                    <td className="px-4 py-3">
+                      <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium',
+                        fulfillType === 'WFS' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700')}>
+                        {fulfillType === 'WFS' ? 'WFS' : 'Seller'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {low
+                        ? <span className="flex items-center gap-1 text-xs font-medium text-amber-600"><AlertTriangle className="h-3 w-3"/>Low Stock</span>
+                        : <span className="text-xs text-emerald-600 font-medium">OK</span>
+                      }
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
