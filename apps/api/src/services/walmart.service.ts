@@ -75,28 +75,34 @@ function toArray<T>(val: T | T[] | undefined | null): T[] {
   return Array.isArray(val) ? val : [val]
 }
 
-// ── Fetch all pages for a shipNodeType ───────────────
-async function fetchByShipNodeType(
+// ── Fetch all orders (all pages, no shipNodeType filter) ──
+// Note: shipNodeType param causes hanging for some Walmart accounts.
+// Fetching without it returns ALL orders (SellerFulfilled + WFS combined).
+async function fetchAllOrders(
   clientId: string,
   clientSecret: string,
-  createdStartDate: string,
-  shipNodeType: 'SellerFulfilled' | 'WalmartFulfilled'
+  createdStartDate: string
 ): Promise<any[]> {
   const collected: any[] = []
   let nextCursor: string | undefined
+  let page = 0
 
   do {
-    const params: Record<string, any> = { createdStartDate, limit: 200, shipNodeType }
+    page++
+    const params: Record<string, any> = { createdStartDate, limit: 200 }
     if (nextCursor) params.nextCursor = nextCursor
 
+    console.log(`[fetchAllOrders] page ${page}, cursor=${nextCursor ? 'yes' : 'none'}`)
     try {
       const data = await walmartRequest('GET', '/orders', clientId, clientSecret, params)
       const orders = toArray(data?.list?.elements?.order)
       const cursor  = data?.list?.meta?.nextCursor
+      console.log(`[fetchAllOrders] page ${page} got ${orders.length} orders, hasMore=${!!cursor}`)
       collected.push(...orders)
       nextCursor = cursor && typeof cursor === 'string' && cursor.trim() !== '' ? cursor : undefined
-    } catch {
-      break // WFS may not be enabled for this seller
+    } catch (e: any) {
+      console.log(`[fetchAllOrders] page ${page} ERROR: ${e.message}`)
+      break
     }
   } while (nextCursor)
 
@@ -143,19 +149,13 @@ export async function syncOrders(orgId: string) {
   const createdStartDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString()
   console.log(`[syncOrders] Date range start: ${createdStartDate}`)
 
-  // Fetch SEQUENTIALLY so we can isolate which call hangs
-  console.log(`[syncOrders] fetching SellerFulfilled...`)
-  const sellerOrders = await fetchByShipNodeType(clientId, clientSecret, createdStartDate, 'SellerFulfilled')
-    .catch((e: any) => { console.log(`[syncOrders] SellerFulfilled ERR: ${e.message}`); return [] as any[] })
-  console.log(`[syncOrders] SellerFulfilled: ${sellerOrders.length} entries`)
+  // Fetch ALL orders in one call (no shipNodeType — that param hangs for some accounts)
+  console.log(`[syncOrders] fetching all orders (no shipNodeType filter)...`)
+  const allOrdersList = await fetchAllOrders(clientId, clientSecret, createdStartDate)
+  console.log(`[syncOrders] total fetched from Walmart: ${allOrdersList.length}`)
 
-  console.log(`[syncOrders] fetching WalmartFulfilled (WFS)...`)
-  const wfsOrders = await fetchByShipNodeType(clientId, clientSecret, createdStartDate, 'WalmartFulfilled')
-    .catch((e: any) => { console.log(`[syncOrders] WFS ERR: ${e.message}`); return [] as any[] })
-  console.log(`[syncOrders] WalmartFulfilled: ${wfsOrders.length} entries`)
-
-  const sellerResult = { status: 'fulfilled' as const, value: sellerOrders }
-  const wfsResult    = { status: 'fulfilled' as const, value: wfsOrders }
+  const sellerResult = { status: 'fulfilled' as const, value: allOrdersList }
+  const wfsResult    = { status: 'fulfilled' as const, value: [] as any[] }
 
   // Walmart API sends one entry PER ORDER LINE (not per purchase order).
   // Multiple lines in one order = same purchaseOrderId, different orderLine entries.
