@@ -75,14 +75,19 @@ function toArray<T>(val: T | T[] | undefined | null): T[] {
   return Array.isArray(val) ? val : [val]
 }
 
-// ── Fetch orders for a specific date window ────────────
-async function fetchOrdersForWindow(
+// ── Fetch orders for a window, recursively splitting if limit hit ──
+async function fetchWindowRecursive(
   clientId: string,
   clientSecret: string,
-  startDate: string,
-  endDate: string,
-  shipNodeType?: string
+  startTs: number,
+  endTs: number,
+  shipNodeType: string | undefined,
+  depth: number = 0
 ): Promise<any[]> {
+  const startDate = new Date(startTs).toISOString()
+  const endDate   = new Date(endTs).toISOString()
+  const tag = shipNodeType ? `-${shipNodeType}` : ''
+
   try {
     const params: Record<string, any> = {
       createdStartDate: startDate,
@@ -94,13 +99,41 @@ async function fetchOrdersForWindow(
 
     const data = await walmartRequest('GET', '/orders', clientId, clientSecret, params)
     const orders = toArray(data?.list?.elements?.order)
-    const total  = data?.list?.meta?.totalCount
-    console.log(`[fetchWindow${shipNodeType ? '-'+shipNodeType : ''}] ${startDate.slice(0,10)}→${endDate.slice(0,10)}: ${orders.length} orders (total=${total})`)
+    const total  = data?.list?.meta?.totalCount ?? 0
+    console.log(`[window${tag} d${depth}] ${startDate.slice(0,10)}→${endDate.slice(0,10)}: ${orders.length}/${total}`)
+
+    // If we hit the limit AND there are more, split the window in half
+    if (orders.length >= 200 && total > 200 && depth < 5) {
+      const midTs = Math.floor((startTs + endTs) / 2)
+      console.log(`[window${tag}] splitting at ${new Date(midTs).toISOString().slice(0,10)}`)
+      const [left, right] = await Promise.all([
+        fetchWindowRecursive(clientId, clientSecret, startTs, midTs, shipNodeType, depth + 1),
+        fetchWindowRecursive(clientId, clientSecret, midTs, endTs, shipNodeType, depth + 1),
+      ])
+      return [...left, ...right]
+    }
+
     return orders
   } catch (e: any) {
-    console.log(`[fetchWindow] ERROR ${startDate.slice(0,10)} ${shipNodeType??'seller'}: ${e.message}`)
+    console.log(`[window${tag}] ERROR ${startDate.slice(0,10)}: ${e.message}`)
     return []
   }
+}
+
+// ── Fetch orders for a specific date window ────────────
+async function fetchOrdersForWindow(
+  clientId: string,
+  clientSecret: string,
+  startDate: string,
+  endDate: string,
+  shipNodeType?: string
+): Promise<any[]> {
+  return fetchWindowRecursive(
+    clientId, clientSecret,
+    new Date(startDate).getTime(),
+    new Date(endDate).getTime(),
+    shipNodeType
+  )
 }
 
 // ── Fetch ALL orders using 20-day windows (seller + WFS) ──
