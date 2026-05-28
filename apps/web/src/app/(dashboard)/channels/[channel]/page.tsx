@@ -83,9 +83,10 @@ function DateRangePicker({ start, end, onChange }: { start: Date; end: Date; onC
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const label = start.toDateString() === end.toDateString()
-    ? format(start, 'MMM d, yyyy')
-    : `${format(start, 'MMM d, yyyy')} – ${format(end, 'MMM d, yyyy')}`
+  // Format in UTC to avoid timezone confusion (e.g. 23:59:59 UTC showing as next day in IST)
+  const startStr = `${start.getUTCFullYear()}-${start.getUTCMonth()}-${start.getUTCDate()}`
+  const endStr   = `${end.getUTCFullYear()}-${end.getUTCMonth()}-${end.getUTCDate()}`
+  const label = startStr === endStr ? fmtUTC(start) : `${fmtUTC(start)} – ${fmtUTC(end)}`
 
   return (
     <div ref={ref} className="relative">
@@ -156,6 +157,9 @@ function DateRangePicker({ start, end, onChange }: { start: Date; end: Date; onC
     </div>
   )
 }
+
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const fmtUTC = (d: Date) => `${MONTHS_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`
 
 export default function ChannelPage() {
   const params  = useParams()
@@ -352,7 +356,7 @@ export default function ChannelPage() {
               <span><strong>{formatCurrency(stats.allTime?.revenue ?? 0)}</strong> revenue</span>
               <span><strong>{formatNumber(stats.allTime?.orderCount ?? 0)}</strong> orders</span>
               <span className="text-xs text-muted-foreground ml-auto">
-                Showing {format(dateRange.start, 'MMM d')} – {format(dateRange.end, 'MMM d, yyyy')} above ↑
+                Showing {fmtUTC(dateRange.start)} – {fmtUTC(dateRange.end)} above ↑
               </span>
             </div>
           )}
@@ -362,7 +366,7 @@ export default function ChannelPage() {
             <div className="xl:col-span-2 rounded-xl border p-5">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-semibold">
-                  Revenue — {format(dateRange.start, 'MMM d')} to {format(dateRange.end, 'MMM d, yyyy')}
+                  Revenue — {fmtUTC(dateRange.start)} to {fmtUTC(dateRange.end)}
                 </h2>
                 <span className="rounded-full px-2.5 py-0.5 text-xs font-medium text-white"
                   style={{ backgroundColor: meta.color }}>{meta.label}</span>
