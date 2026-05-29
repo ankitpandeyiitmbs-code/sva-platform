@@ -163,10 +163,7 @@ export default function LoginPage() {
           </form>
 
           <p className="text-center text-sm text-muted-foreground">
-            First time?{' '}
-            <Link href="/register" className="font-medium text-primary hover:underline">
-              Create your workspace
-            </Link>
+            <span className="text-muted-foreground/50">Contact your administrator for access.</span>
           </p>
         </div>
       </div>
