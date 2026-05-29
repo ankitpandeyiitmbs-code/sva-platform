@@ -65,7 +65,8 @@ export function Sidebar() {
   const { user, logout } = useAuthStore()
   const [collapsed, setCollapsed] = useState(false)
 
-  const userPermissions = user?.permissions ?? NAV_SECTIONS.flatMap(s => s.items.map(i => i.permission))
+  // All logged-in users see all nav items - access control is enforced at API level
+  const userPermissions = NAV_SECTIONS.flatMap(s => s.items.map(i => i.permission))
 
   // Load connected channels for the Channels section
   const { data: channels } = useQuery({
