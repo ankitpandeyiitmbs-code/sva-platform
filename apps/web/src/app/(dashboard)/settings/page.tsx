@@ -299,6 +299,9 @@ function TeamSettings() {
   const [inviting, setInviting] = useState(false)
   const [createdUser, setCreatedUser] = useState<any>(null)
   const [editingRole, setEditingRole] = useState<string | null>(null)
+  const [resetPwdUser, setResetPwdUser] = useState<any>(null)
+  const [newPwd, setNewPwd] = useState('')
+  const [resetting, setResetting] = useState(false)
 
   const { data: usersData } = useQuery({
     queryKey: ['users'],
@@ -333,6 +336,17 @@ function TeamSettings() {
       setEditingRole(null)
       toast.success('Role updated')
     } catch (e: any) { toast.error(e?.response?.data?.message ?? 'Failed') }
+  }
+
+  const resetPassword = async () => {
+    if (!resetPwdUser || newPwd.length < 8) return toast.error('Password must be at least 8 characters')
+    setResetting(true)
+    try {
+      await api.patch(`/users/${resetPwdUser.id}`, { newPassword: newPwd })
+      toast.success(`Password updated for ${resetPwdUser.name}`)
+      setResetPwdUser(null); setNewPwd('')
+    } catch (e: any) { toast.error(e?.response?.data?.message ?? 'Failed') }
+    finally { setResetting(false) }
   }
 
   const toggleActive = async (userId: string, isActive: boolean) => {
@@ -402,6 +416,26 @@ function TeamSettings() {
               ✓ <strong>{createdUser.name}</strong> added. Share their login credentials securely.
             </div>
           )}
+        </div>
+      )}
+
+      {/* Reset password modal */}
+      {resetPwdUser && (
+        <div className="rounded-xl border bg-amber-50 dark:bg-amber-950/20 border-amber-200 p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="font-medium text-sm">Reset password for <strong>{resetPwdUser.name}</strong></h4>
+            <button onClick={() => { setResetPwdUser(null); setNewPwd('') }} className="text-muted-foreground hover:text-foreground text-xs">✕ Cancel</button>
+          </div>
+          <div className="flex gap-2">
+            <input value={newPwd} onChange={e => setNewPwd(e.target.value)} type="text"
+              placeholder="New password (min 8 characters)"
+              className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary" />
+            <button onClick={resetPassword} disabled={resetting || newPwd.length < 8}
+              className="rounded-lg bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2 whitespace-nowrap">
+              {resetting && <Loader2 className="h-3 w-3 animate-spin" />} Set Password
+            </button>
+          </div>
+          {newPwd.length > 0 && newPwd.length < 8 && <p className="text-xs text-amber-700">Need {8 - newPwd.length} more characters</p>}
         </div>
       )}
 

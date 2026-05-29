@@ -42,7 +42,7 @@ export async function userRoutes(app: FastifyInstance) {
   // PATCH /users/:id — update role/status (requires users:write + role hierarchy)
   app.patch('/:id', { preHandler: requirePermission('users:write') }, async (req, reply) => {
     const { id } = req.params as { id: string }
-    const { role, isActive, name, phone } = req.body as any
+    const { role, isActive, name, newPassword } = req.body as any
 
     const target = await prisma.user.findFirst({ where: { id, orgId: req.user!.orgId } })
     if (!target) return reply.code(404).send({ success: false, message: 'User not found' })
@@ -61,9 +61,14 @@ export async function userRoutes(app: FastifyInstance) {
     }
 
     const updates: any = {}
-    if (role !== undefined)     updates.role = role
-    if (isActive !== undefined) updates.isActive = isActive
-    if (name !== undefined)     updates.name = name
+    if (role !== undefined)        updates.role = role
+    if (isActive !== undefined)    updates.isActive = isActive
+    if (name !== undefined)        updates.name = name
+    if (newPassword !== undefined) {
+      if (newPassword.length < 8) return reply.code(400).send({ success: false, message: 'Password must be at least 8 characters' })
+      const bcrypt = (await import('bcryptjs')).default
+      updates.passwordHash = await bcrypt.hash(newPassword, 12)
+    }
     // phone field removed
 
     const user = await prisma.user.update({
