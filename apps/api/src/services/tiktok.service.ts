@@ -59,7 +59,7 @@ async function apiRequest(
 
 // ── OAuth: generate auth URL ──────────────────────────
 export function getAuthUrl(state: string): string {
-  return `${AUTH_BASE}/oauth/authorize?app_key=${APP_KEY}&state=${encodeURIComponent(state)}`
+  return `${AUTH_BASE}/oauth/authorize?app_key=${APP_KEY}&state=${encodeURIComponent(state)}&seller_region=US`
 }
 
 // ── OAuth: exchange code for tokens ──────────────────
