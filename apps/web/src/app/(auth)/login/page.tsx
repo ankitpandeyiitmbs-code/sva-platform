@@ -12,7 +12,7 @@ import Link from 'next/link'
 
 const schema = z.object({
   email: z.string().email('Enter a valid email'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  password: z.string().min(1, 'Password is required'),
   orgSlug: z.string().min(1, 'Organization ID is required'),
 })
 type FormData = z.infer<typeof schema>

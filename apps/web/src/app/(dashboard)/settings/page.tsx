@@ -384,9 +384,9 @@ function TeamSettings() {
               </select>
             </div>
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Password (leave blank to auto-generate)</label>
+              <label className="text-xs text-muted-foreground mb-1 block">Password (min 8 chars, or leave blank to auto-generate)</label>
               <input value={inviteForm.password} onChange={e => setInviteForm(f => ({...f, password: e.target.value}))}
-                placeholder="Auto-generated if empty" type="text"
+                placeholder="Min 8 characters" type="text"
                 className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary" />
             </div>
           </div>
