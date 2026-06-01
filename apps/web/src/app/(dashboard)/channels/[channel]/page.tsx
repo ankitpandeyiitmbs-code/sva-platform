@@ -57,8 +57,9 @@ function localDayEnd(offsetDays = 0): Date {
 const PRESETS = [
   { label: 'Today',         getRange: () => ({ start: localDay(0),    end: localDayEnd(0) }) },
   { label: 'Yesterday',     getRange: () => ({ start: localDay(-1),   end: localDayEnd(-1) }) },
-  { label: 'Last 7 days',   getRange: () => ({ start: localDay(-6),   end: localDayEnd(0) }) },
-  { label: 'Last 30 days',  getRange: () => ({ start: localDay(-29),  end: localDayEnd(0) }) },
+  // Last N days = N complete past days, NOT including today (matches Walmart seller dashboard)
+  { label: 'Last 7 days',   getRange: () => ({ start: localDay(-7),   end: localDayEnd(-1) }) },
+  { label: 'Last 30 days',  getRange: () => ({ start: localDay(-30),  end: localDayEnd(-1) }) },
   { label: 'This month',    getRange: () => {
     const d = new Date(); return { start: new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0), end: localDayEnd(0) }
   }},
@@ -68,8 +69,8 @@ const PRESETS = [
     const e = new Date(d.getFullYear(), d.getMonth(), 0, 23, 59, 59, 999)
     return { start: s, end: e }
   }},
-  { label: 'Last 90 days',  getRange: () => ({ start: localDay(-89),  end: localDayEnd(0) }) },
-  { label: 'Last 180 days', getRange: () => ({ start: localDay(-179), end: localDayEnd(0) }) },
+  { label: 'Last 90 days',  getRange: () => ({ start: localDay(-90),  end: localDayEnd(-1) }) },
+  { label: 'Last 180 days', getRange: () => ({ start: localDay(-180), end: localDayEnd(-1) }) },
 ]
 
 const FULFILLMENT_COLORS: Record<string, string> = {
@@ -188,10 +189,10 @@ export default function ChannelPage() {
   const [invStock, setInvStock]       = useState('') // low | ok | ''
   const [invSort, setInvSort]         = useState('name') // name | qty-asc | qty-desc
 
-  // Date range state — default last 30 days (local timezone)
+  // Date range state — default last 30 days (local timezone, matches Walmart: 30 complete past days)
   const [dateRange, setDateRange] = useState({
-    start: localDay(-29),
-    end:   localDayEnd(0),
+    start: localDay(-30),
+    end:   localDayEnd(-1),
   })
 
   const { data: channelConfig } = useQuery({

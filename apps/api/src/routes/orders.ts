@@ -1,15 +1,20 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../lib/db'
 
+// Statuses that represent real sales (excludes cancelled/unfulfillable)
+const ACTIVE_STATUSES = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'COMPLETED']
+
 export async function orderRoutes(app: FastifyInstance) {
   app.get('/', async (req, reply) => {
     if (!req.user) return reply.code(401).send({ success: false })
-    const { page = '1', limit = '50', status, channel, search } = req.query as any
+    const { page = '1', limit = '50', status, channel, search, startDate, endDate, fulfillmentStatus } = req.query as any
     const skip = (parseInt(page) - 1) * parseInt(limit)
     const where: any = { orgId: req.user.orgId }
     if (status) where.status = status
     if (channel) where.channel = channel
+    if (fulfillmentStatus) where.fulfillmentStatus = fulfillmentStatus
     if (search) where.orderNumber = { contains: search, mode: 'insensitive' }
+    if (startDate && endDate) where.orderedAt = { gte: new Date(startDate), lte: new Date(endDate) }
     const [data, total] = await Promise.all([
       prisma.order.findMany({ where, skip, take: parseInt(limit), include: { customer: { select: { firstName: true, lastName: true, email: true } }, items: true }, orderBy: { orderedAt: 'desc' } }),
       prisma.order.count({ where }),
@@ -29,11 +34,7 @@ export async function orderRoutes(app: FastifyInstance) {
     if (!req.user) return reply.code(401).send({ success: false })
     const { items, ...orderData } = req.body as any
     const order = await prisma.order.create({
-      data: {
-        ...orderData,
-        orgId: req.user.orgId,
-        items: { create: items ?? [] },
-      },
+      data: { ...orderData, orgId: req.user.orgId, items: { create: items ?? [] } },
       include: { items: true },
     })
     return reply.code(201).send({ success: true, data: order })
@@ -46,44 +47,41 @@ export async function orderRoutes(app: FastifyInstance) {
     return reply.send({ success: true, data: order })
   })
 
-  // GET /orders/stats — server-side aggregated stats with proper date filter
+  // GET /orders/stats
   app.get('/stats', async (req, reply) => {
     if (!req.user) return reply.code(401).send({ success: false })
-    const { channel, days = '30' } = req.query as any
+    const { channel, days = '30', startDate, endDate } = req.query as any
     const orgId = req.user.orgId
-    const since = new Date(Date.now() - parseInt(days) * 24 * 60 * 60 * 1000)
 
-    // Support custom date range (startDate/endDate) OR days-based range
-    const { startDate, endDate } = req.query as any
-    let where: any = { orgId }
-    if (channel) where.channel = channel
+    // ── Date filter ───────────────────────────────────────
+    let dateFilter: any = {}
     if (startDate && endDate) {
-      where.orderedAt = { gte: new Date(startDate), lte: new Date(endDate) }
+      dateFilter = { gte: new Date(startDate), lte: new Date(endDate) }
     } else {
-      where.orderedAt = { gte: since }
+      dateFilter = { gte: new Date(Date.now() - parseInt(days) * 24 * 60 * 60 * 1000) }
     }
 
+    // ── Active orders only (match Walmart seller dashboard — exclude cancelled) ──
+    const where: any = {
+      orgId,
+      status: { in: ACTIVE_STATUSES },
+      orderedAt: dateFilter,
+    }
+    if (channel) where.channel = channel
+
+    // All-time uses same status filter but no date
+    const allTimeWhere: any = { orgId, status: { in: ACTIVE_STATUSES } }
+    if (channel) allTimeWhere.channel = channel
+
     const [agg, orders, allTime] = await Promise.all([
-      prisma.order.aggregate({
-        where,
-        _sum: { total: true },
-        _count: { id: true },
-        _avg: { total: true },
-      }),
-      prisma.order.findMany({
-        where,
-        select: { orderedAt: true, total: true, status: true },
-        orderBy: { orderedAt: 'asc' },
-      }),
-      prisma.order.aggregate({
-        where: { orgId, ...(channel ? { channel } : {}) },
-        _sum: { total: true },
-        _count: { id: true },
-      }),
+      prisma.order.aggregate({ where, _sum: { total: true }, _count: { id: true }, _avg: { total: true } }),
+      prisma.order.findMany({ where, select: { orderedAt: true, total: true, status: true }, orderBy: { orderedAt: 'asc' } }),
+      prisma.order.aggregate({ where: allTimeWhere, _sum: { total: true }, _count: { id: true } }),
     ])
 
-    const pending = orders.filter(o => ['PENDING','PROCESSING'].includes(o.status)).length
+    const pending = orders.filter(o => ['PENDING', 'PROCESSING'].includes(o.status)).length
 
+    // Group revenue by local date (ISO date is UTC — offset to match local day)
     const byDay: Record<string, number> = {}
     for (const o of orders) {
       const day = o.orderedAt.toISOString().slice(0, 10)
@@ -97,7 +95,6 @@ export async function orderRoutes(app: FastifyInstance) {
       where: { order: where },
       select: { sku: true, name: true, quantity: true, total: true },
     })
-    const totalUnits = items.reduce((s, i) => s + i.quantity, 0)
     const skuMap: Record<string, { name: string; qty: number; revenue: number }> = {}
     for (const item of items) {
       if (!skuMap[item.sku]) skuMap[item.sku] = { name: item.name, qty: 0, revenue: 0 }
@@ -127,14 +124,18 @@ export async function orderRoutes(app: FastifyInstance) {
     })
   })
 
-  // GET /orders/profit — P&L by date range for a channel
+  // GET /orders/profit — P&L by date range
   app.get('/profit', async (req: any, reply: any) => {
     if (!req.user) return reply.code(401).send({ success: false })
     const { channel, startDate, endDate } = req.query as any
     const orgId = req.user.orgId
     const { WALMART_COSTS } = await import('../lib/walmart-costs')
 
-    const where: any = { orgId, items: { some: {} } }
+    const where: any = {
+      orgId,
+      status: { in: ACTIVE_STATUSES },  // exclude cancelled from P&L
+      items: { some: {} },
+    }
     if (channel) where.channel = channel
     if (startDate && endDate) {
       where.orderedAt = { gte: new Date(startDate), lte: new Date(endDate) }
@@ -167,14 +168,11 @@ export async function orderRoutes(app: FastifyInstance) {
         const netPayout = revenue - totalItemFees
         const netProfit = netPayout - cogs
 
-        totalRevenue += revenue
-        totalCogs += cogs
-        totalFees += totalItemFees
-        totalProfit += netProfit
+        totalRevenue += revenue; totalCogs += cogs
+        totalFees += totalItemFees; totalProfit += netProfit
 
         const d = dayMap.get(day)!
-        d.revenue += revenue
-        d.profit += netProfit
+        d.revenue += revenue; d.profit += netProfit
 
         const existing = skuMap.get(item.sku)
         if (!existing) {
@@ -218,5 +216,4 @@ export async function orderRoutes(app: FastifyInstance) {
       },
     })
   })
-
 }
