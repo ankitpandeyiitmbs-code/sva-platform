@@ -342,6 +342,16 @@ export default function CustomersPage() {
     onError: () => toast.error('Failed to delete'),
   })
 
+  const backfillMutation = useMutation({
+    mutationFn: () => api.post('/customers/backfill'),
+    onSuccess: (res) => {
+      const d = res.data.data
+      toast.success(`Built ${d.created} new customers, updated ${d.updated}, linked ${d.linked} orders`)
+      qc.invalidateQueries({ queryKey: ['customers'] })
+    },
+    onError: (e: any) => toast.error(e.response?.data?.message ?? 'Backfill failed'),
+  })
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -352,12 +362,24 @@ export default function CustomersPage() {
             {formatNumber(total)} customers across all channels
           </p>
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90"
-        >
-          <Plus className="h-4 w-4" /> Add Customer
-        </button>
+        <div className="flex items-center gap-2">
+          {(stats?.total === 0 || total === 0) && (
+            <button
+              onClick={() => backfillMutation.mutate()}
+              disabled={backfillMutation.isPending}
+              className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/10 disabled:opacity-50"
+            >
+              <RefreshCw className={cn('h-4 w-4', backfillMutation.isPending && 'animate-spin')} />
+              {backfillMutation.isPending ? 'Building customers…' : 'Build from Orders'}
+            </button>
+          )}
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" /> Add Customer
+          </button>
+        </div>
       </div>
 
       {/* KPI Cards */}
@@ -438,8 +460,18 @@ export default function CustomersPage() {
                 <tr>
                   <td colSpan={8} className="py-16 text-center">
                     <Users className="mx-auto h-10 w-10 text-muted-foreground/30 mb-3" />
-                    <p className="text-muted-foreground font-medium">No customers found</p>
-                    <p className="text-sm text-muted-foreground/60 mt-1">Customers are created automatically when orders are synced</p>
+                    <p className="text-muted-foreground font-medium">No customers yet</p>
+                    <p className="text-sm text-muted-foreground/60 mt-1 mb-4">
+                      Click <strong>Build from Orders</strong> to generate customer records from your synced orders
+                    </p>
+                    <button
+                      onClick={() => backfillMutation.mutate()}
+                      disabled={backfillMutation.isPending}
+                      className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      <RefreshCw className={cn('h-4 w-4', backfillMutation.isPending && 'animate-spin')} />
+                      {backfillMutation.isPending ? 'Building…' : 'Build from Orders'}
+                    </button>
                   </td>
                 </tr>
               ) : (

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { prisma } from '../lib/db'
+import { backfillCustomers } from '../services/customer-sync.service'
 
 export async function customerRoutes(app: FastifyInstance) {
   // GET /customers/stats — KPI summary
@@ -59,6 +60,17 @@ export async function customerRoutes(app: FastifyInstance) {
       prisma.customer.count({ where }),
     ])
     return reply.send({ success: true, data, total, page: parseInt(page), limit: parseInt(limit), totalPages: Math.ceil(total / parseInt(limit)) })
+  })
+
+  // POST /customers/backfill — build customer records from all existing orders
+  app.post('/backfill', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    try {
+      const result = await backfillCustomers(req.user.orgId)
+      return reply.send({ success: true, data: result })
+    } catch (err: any) {
+      return reply.code(500).send({ success: false, message: err.message })
+    }
   })
 
   app.get('/:id', async (req, reply) => {
