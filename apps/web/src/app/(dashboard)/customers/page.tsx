@@ -343,7 +343,7 @@ export default function CustomersPage() {
   })
 
   const backfillMutation = useMutation({
-    mutationFn: () => api.post('/customers/backfill'),
+    mutationFn: () => api.post('/customers/backfill', {}),
     onSuccess: (res) => {
       const d = res.data.data
       toast.success(`Built ${d.created} new customers, updated ${d.updated}, linked ${d.linked} orders`)
