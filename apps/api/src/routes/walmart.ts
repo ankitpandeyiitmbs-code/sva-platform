@@ -308,12 +308,14 @@ export async function walmartRoutes(app: FastifyInstance) {
     const start = Date.now()
     
     const result = await new Promise<any>((resolve) => {
+      let req_obj: any
+
       const timer = setTimeout(() => {
-        req_obj.destroy()
+        if (req_obj) req_obj.destroy()
         resolve({ status: 'TIMEOUT', elapsed: Date.now() - start, message: 'No response after 8s — Walmart API unreachable from Railway IP' })
       }, 8000)
-      
-      const req_obj = https.request({
+
+      req_obj = https.request({
         hostname: 'marketplace.walmartapis.com',
         port: 443,
         path: '/v3/token',

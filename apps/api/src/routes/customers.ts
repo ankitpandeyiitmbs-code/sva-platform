@@ -2,9 +2,31 @@ import type { FastifyInstance } from 'fastify'
 import { prisma } from '../lib/db'
 
 export async function customerRoutes(app: FastifyInstance) {
+  // GET /customers/stats — KPI summary
+  app.get('/stats', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const orgId = req.user.orgId
+    const [total, active, topLtv, repeatCount] = await Promise.all([
+      prisma.customer.count({ where: { orgId } }),
+      prisma.customer.count({ where: { orgId, isActive: true } }),
+      prisma.customer.aggregate({ where: { orgId }, _avg: { ltv: true }, _sum: { ltv: true } }),
+      prisma.customer.count({ where: { orgId, totalOrders: { gte: 2 } } }),
+    ])
+    return reply.send({
+      success: true,
+      data: {
+        total,
+        active,
+        avgLtv: Number(topLtv._avg.ltv ?? 0),
+        totalRevenue: Number(topLtv._sum.ltv ?? 0),
+        repeatRate: total > 0 ? Math.round((repeatCount / total) * 100) : 0,
+      },
+    })
+  })
+
   app.get('/', async (req, reply) => {
     if (!req.user) return reply.code(401).send({ success: false })
-    const { page = '1', limit = '50', search } = req.query as any
+    const { page = '1', limit = '50', search, channel, tier, sort = 'createdAt' } = req.query as any
     const skip = (parseInt(page) - 1) * parseInt(limit)
     const where: any = { orgId: req.user.orgId }
     if (search) where.OR = [
@@ -13,8 +35,27 @@ export async function customerRoutes(app: FastifyInstance) {
       { lastName: { contains: search, mode: 'insensitive' } },
       { company: { contains: search, mode: 'insensitive' } },
     ]
+    if (channel) where.sourceChannel = channel
+    if (tier) where.loyaltyTier = tier
+
+    const orderBy: any =
+      sort === 'ltv' ? { ltv: 'desc' } :
+      sort === 'orders' ? { totalOrders: 'desc' } :
+      sort === 'lastOrder' ? { lastOrderAt: 'desc' } :
+      { createdAt: 'desc' }
+
     const [data, total] = await Promise.all([
-      prisma.customer.findMany({ where, skip, take: parseInt(limit), orderBy: { createdAt: 'desc' } }),
+      prisma.customer.findMany({
+        where, skip, take: parseInt(limit), orderBy,
+        select: {
+          id: true, firstName: true, lastName: true, email: true, phone: true,
+          company: true, avatarUrl: true, sourceChannel: true, source: true,
+          ltv: true, totalOrders: true, averageOrderValue: true,
+          loyaltyTier: true, loyaltyPoints: true, leadScore: true,
+          tags: true, country: true, city: true, isActive: true,
+          lastOrderAt: true, createdAt: true,
+        },
+      }),
       prisma.customer.count({ where }),
     ])
     return reply.send({ success: true, data, total, page: parseInt(page), limit: parseInt(limit), totalPages: Math.ceil(total / parseInt(limit)) })

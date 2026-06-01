@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Users, ShoppingCart, Package, Headphones,
   BarChart3, Megaphone, FolderKanban, MessageSquare, Zap,
-  Settings, LogOut, LineChart, Store,
+  Settings, LogOut, LineChart, Store, Sparkles, UserCircle,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { useState } from 'react'
@@ -34,6 +34,8 @@ const NAV_SECTIONS = [
       { href: '/analytics',  icon: LineChart,       label: 'Analytics',  permission: 'dashboard:read' },
       { href: '/orders',     icon: ShoppingCart,    label: 'Orders',     permission: 'orders:read'    },
       { href: '/inventory',  icon: Package,         label: 'Inventory',  permission: 'inventory:read' },
+      { href: '/customers',  icon: UserCircle,      label: 'Customers',  permission: 'crm:read'       },
+      { href: '/ai',         icon: Sparkles,        label: 'AI Assistant', permission: 'dashboard:read' },
     ],
   },
   {
