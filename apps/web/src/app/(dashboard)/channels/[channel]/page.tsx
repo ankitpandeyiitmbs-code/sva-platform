@@ -39,32 +39,37 @@ const SYNC_ROUTES: Record<string, string> = {
 }
 
 // ── Date range presets ────────────────────────────────
-// Use UTC date boundaries so filtering is timezone-independent
-function utcDay(offsetDays = 0): Date {
+// Use LOCAL midnight so "Yesterday" / "Today" match the user's clock,
+// not UTC (which would shift by +5:30 for IST users).
+function localDay(offsetDays = 0): Date {
   const d = new Date()
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + offsetDays))
+  d.setDate(d.getDate() + offsetDays)
+  d.setHours(0, 0, 0, 0)
+  return d
 }
-function utcDayEnd(offsetDays = 0): Date {
+function localDayEnd(offsetDays = 0): Date {
   const d = new Date()
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + offsetDays, 23, 59, 59))
+  d.setDate(d.getDate() + offsetDays)
+  d.setHours(23, 59, 59, 999)
+  return d
 }
 
 const PRESETS = [
-  { label: 'Today',         getRange: () => ({ start: utcDay(0),    end: utcDayEnd(0) }) },
-  { label: 'Yesterday',     getRange: () => ({ start: utcDay(-1),   end: utcDayEnd(-1) }) },
-  { label: 'Last 7 days',   getRange: () => ({ start: utcDay(-6),   end: utcDayEnd(0) }) },
-  { label: 'Last 30 days',  getRange: () => ({ start: utcDay(-29),  end: utcDayEnd(0) }) },
+  { label: 'Today',         getRange: () => ({ start: localDay(0),    end: localDayEnd(0) }) },
+  { label: 'Yesterday',     getRange: () => ({ start: localDay(-1),   end: localDayEnd(-1) }) },
+  { label: 'Last 7 days',   getRange: () => ({ start: localDay(-6),   end: localDayEnd(0) }) },
+  { label: 'Last 30 days',  getRange: () => ({ start: localDay(-29),  end: localDayEnd(0) }) },
   { label: 'This month',    getRange: () => {
-    const d = new Date(); return { start: new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)), end: utcDayEnd(0) }
+    const d = new Date(); return { start: new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0), end: localDayEnd(0) }
   }},
   { label: 'Last month',    getRange: () => {
     const d = new Date()
-    const s = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1))
-    const e = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0, 23, 59, 59))
+    const s = new Date(d.getFullYear(), d.getMonth() - 1, 1, 0, 0, 0, 0)
+    const e = new Date(d.getFullYear(), d.getMonth(), 0, 23, 59, 59, 999)
     return { start: s, end: e }
   }},
-  { label: 'Last 90 days',  getRange: () => ({ start: utcDay(-89),  end: utcDayEnd(0) }) },
-  { label: 'Last 180 days', getRange: () => ({ start: utcDay(-179), end: utcDayEnd(0) }) },
+  { label: 'Last 90 days',  getRange: () => ({ start: localDay(-89),  end: localDayEnd(0) }) },
+  { label: 'Last 180 days', getRange: () => ({ start: localDay(-179), end: localDayEnd(0) }) },
 ]
 
 const FULFILLMENT_COLORS: Record<string, string> = {
@@ -83,9 +88,9 @@ function DateRangePicker({ start, end, onChange }: { start: Date; end: Date; onC
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  // Format in UTC to avoid timezone confusion (e.g. 23:59:59 UTC showing as next day in IST)
-  const startStr = `${start.getUTCFullYear()}-${start.getUTCMonth()}-${start.getUTCDate()}`
-  const endStr   = `${end.getUTCFullYear()}-${end.getUTCMonth()}-${end.getUTCDate()}`
+  // Use local date parts for display label (IST-safe)
+  const startStr = `${start.getFullYear()}-${start.getMonth()}-${start.getDate()}`
+  const endStr   = `${end.getFullYear()}-${end.getMonth()}-${end.getDate()}`
   const label = startStr === endStr ? fmtUTC(start) : `${fmtUTC(start)} – ${fmtUTC(end)}`
 
   return (
@@ -159,7 +164,8 @@ function DateRangePicker({ start, end, onChange }: { start: Date; end: Date; onC
 }
 
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-const fmtUTC = (d: Date) => `${MONTHS_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`
+// Use local date components so the label matches the user's calendar (IST-correct)
+const fmtUTC = (d: Date) => `${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
 
 export default function ChannelPage() {
   const params  = useParams()
@@ -182,10 +188,10 @@ export default function ChannelPage() {
   const [invStock, setInvStock]       = useState('') // low | ok | ''
   const [invSort, setInvSort]         = useState('name') // name | qty-asc | qty-desc
 
-  // Date range state — default last 30 days
+  // Date range state — default last 30 days (local timezone)
   const [dateRange, setDateRange] = useState({
-    start: utcDay(-29),
-    end:   utcDayEnd(0),
+    start: localDay(-29),
+    end:   localDayEnd(0),
   })
 
   const { data: channelConfig } = useQuery({
