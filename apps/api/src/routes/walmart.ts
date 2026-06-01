@@ -328,7 +328,7 @@ export async function walmartRoutes(app: FastifyInstance) {
         res.resume()
       })
       
-      req_obj.on('error', (err) => {
+      req_obj.on('error', (err: Error) => {
         clearTimeout(timer)
         resolve({ status: 'ERROR', error: err.message, elapsed: Date.now() - start })
       })
