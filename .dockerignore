@@ -1,0 +1,20 @@
+**/node_modules
+**/dist
+**/.next
+**/build
+**/.turbo
+**/.cache
+**/coverage
+**/.git
+**/.github
+**/.vscode
+**/.env
+**/.env.local
+**/.env.*.local
+**/*.log
+**/.DS_Store
+
+# Don't include the web app — Fly only runs the API
+apps/web
+
+# Source dirs we DO need: apps/api, packages/* — explicitly NOT excluded
