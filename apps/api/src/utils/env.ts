@@ -49,9 +49,12 @@ const envSchema = z.object({
   SHOPIFY_STORE_URL: z.string().default('REPLACE_WITH_YOUR_STORE.myshopify.com'),
   SHOPIFY_ACCESS_TOKEN: z.string().default('REPLACE_WITH_SHOPIFY_ACCESS_TOKEN'),
 
-  // Walmart
+  // Walmart Marketplace API (orders, inventory)
   WALMART_CLIENT_ID: z.string().default('REPLACE_WITH_WALMART_CLIENT_ID'),
   WALMART_CLIENT_SECRET: z.string().default('REPLACE_WITH_WALMART_CLIENT_SECRET'),
+  // Walmart Connect (Sponsored Products) — reuses marketplace clientId/secret,
+  // advertiser ID identifies which ad account to manage
+  WALMART_ADVERTISER_ID: z.string().default(''),
 
   // TikTok Shop
   TIKTOK_APP_KEY: z.string().default('REPLACE_WITH_TIKTOK_APP_KEY'),

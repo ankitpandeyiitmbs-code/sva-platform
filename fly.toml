@@ -7,6 +7,10 @@ primary_region = "iad"   # US East (Ashburn, VA) — closest to Walmart's US inf
 [build]
   dockerfile = "apps/api/Dockerfile"
 
+# Sync Prisma schema to Neon once per deploy (uses db push since there's no migration history)
+[deploy]
+  release_command = "sh -c 'cd /app/apps/api && npx prisma db push --skip-generate'"
+
 [env]
   NODE_ENV = "production"
   PORT = "4000"

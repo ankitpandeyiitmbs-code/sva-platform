@@ -153,6 +153,26 @@ export async function orderRoutes(app: FastifyInstance) {
       include: { items: { select: { sku: true, quantity: true, unitPrice: true, total: true } } },
     })
 
+    // ── Ad spend in the same window (deducted from net profit) ──
+    const adSpendRows = await prisma.adSpend.findMany({
+      where: {
+        orgId,
+        ...(channel ? { channel } : {}),
+        date: where.orderedAt ? { gte: where.orderedAt.gte, lte: where.orderedAt.lte } : undefined,
+      },
+      select: { date: true, sku: true, spend: true },
+    })
+    const adSpendBySku: Record<string, number> = {}
+    const adSpendByDay: Record<string, number> = {}
+    let totalAdSpend = 0
+    for (const a of adSpendRows) {
+      const s = Number(a.spend ?? 0)
+      totalAdSpend += s
+      const day = a.date.toISOString().slice(0, 10)
+      adSpendByDay[day] = (adSpendByDay[day] ?? 0) + s
+      if (a.sku) adSpendBySku[a.sku] = (adSpendBySku[a.sku] ?? 0) + s
+    }
+
     const skuMap = new Map<string, any>()
     let totalRevenue = 0, totalCogs = 0, totalFees = 0, totalProfit = 0
     const dayMap = new Map<string, { revenue: number; profit: number }>()
@@ -192,31 +212,60 @@ export async function orderRoutes(app: FastifyInstance) {
       }
     }
 
+    // Subtract ad spend per day from profit (per-day chart accuracy)
     const chart = Array.from(dayMap.entries())
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, v]) => ({ date, revenue: +v.revenue.toFixed(2), profit: +v.profit.toFixed(2) }))
+      .map(([date, v]) => {
+        const dayAd = adSpendByDay[date] ?? 0
+        return {
+          date,
+          revenue: +v.revenue.toFixed(2),
+          profit:  +(v.profit - dayAd).toFixed(2),
+          adSpend: +dayAd.toFixed(2),
+        }
+      })
+
+    // Net profit after ads (summary)
+    const netProfitAfterAds = totalProfit - totalAdSpend
 
     const products = Array.from(skuMap.values())
       .sort((a: any, b: any) => b.netProfit - a.netProfit)
-      .map((p: any) => ({
-        ...p,
-        revenue: +p.revenue.toFixed(2), cogs: +p.cogs.toFixed(2),
-        refFee: +p.refFee.toFixed(2), fulfillmentFee: +p.fulfillmentFee.toFixed(2),
-        totalFees: +p.totalFees.toFixed(2), netPayout: +p.netPayout.toFixed(2),
-        netProfit: +p.netProfit.toFixed(2),
-        margin: p.revenue > 0 ? +((p.netProfit / p.revenue) * 100).toFixed(1) : 0,
-      }))
+      .map((p: any) => {
+        const adSpend = adSpendBySku[p.sku] ?? 0
+        const netProfitAfterAd = p.netProfit - adSpend
+        return {
+          ...p,
+          revenue:        +p.revenue.toFixed(2),
+          cogs:           +p.cogs.toFixed(2),
+          refFee:         +p.refFee.toFixed(2),
+          fulfillmentFee: +p.fulfillmentFee.toFixed(2),
+          totalFees:      +p.totalFees.toFixed(2),
+          netPayout:      +p.netPayout.toFixed(2),
+          adSpend:        +adSpend.toFixed(2),
+          // ACoS = ad spend / revenue × 100
+          acos:           p.revenue > 0 ? +((adSpend / p.revenue) * 100).toFixed(1) : 0,
+          // netProfit is BEFORE ads; netProfitAfterAd is the true bottom line
+          netProfit:      +p.netProfit.toFixed(2),
+          netProfitAfterAd: +netProfitAfterAd.toFixed(2),
+          margin: p.revenue > 0 ? +((netProfitAfterAd / p.revenue) * 100).toFixed(1) : 0,
+        }
+      })
 
     return reply.send({
       success: true,
       data: {
         summary: {
-          revenue: +totalRevenue.toFixed(2), cogs: +totalCogs.toFixed(2),
-          totalFees: +totalFees.toFixed(2), netProfit: +totalProfit.toFixed(2),
-          margin: totalRevenue > 0 ? +((totalProfit / totalRevenue) * 100).toFixed(1) : 0,
-          orderCount: orders.length,
-          coveredSkus: products.filter((p: any) => p.hasCosts).length,
-          totalSkus: products.length,
+          revenue:           +totalRevenue.toFixed(2),
+          cogs:              +totalCogs.toFixed(2),
+          totalFees:         +totalFees.toFixed(2),
+          adSpend:           +totalAdSpend.toFixed(2),
+          netProfitBeforeAds: +totalProfit.toFixed(2),
+          netProfit:         +netProfitAfterAds.toFixed(2),  // true bottom line
+          margin:            totalRevenue > 0 ? +((netProfitAfterAds / totalRevenue) * 100).toFixed(1) : 0,
+          acos:              totalRevenue > 0 ? +((totalAdSpend / totalRevenue) * 100).toFixed(1) : 0,
+          orderCount:        orders.length,
+          coveredSkus:       products.filter((p: any) => p.hasCosts).length,
+          totalSkus:         products.length,
         },
         chart,
         products,

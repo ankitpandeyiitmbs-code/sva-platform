@@ -911,3 +911,32 @@ model AuditLog {
 
   @@map("audit_logs")
 }
+
+// ─────────────────────────────────────────────
+// ADVERTISING: Daily ad spend per SKU per channel
+// Used by /orders/profit to deduct ad cost from net profit
+// ─────────────────────────────────────────────
+
+model AdSpend {
+  id                String   @id @default(cuid())
+  orgId             String
+  date              DateTime @db.Date           // Day this spend belongs to
+  channel           String   @default("WALMART") // WALMART | AMAZON | TIKTOK_SHOP ...
+  campaignId        String?
+  campaignName      String?
+  itemId            String?                      // Walmart item ID / Amazon ASIN
+  sku               String?                      // Mapped seller SKU
+  spend             Decimal  @db.Decimal(12, 2)
+  impressions       Int      @default(0)
+  clicks            Int      @default(0)
+  attributedUnits   Int      @default(0)        // Sales units credited to the ad
+  attributedRevenue Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // One row per (org, day, channel, campaign, item) — re-syncs upsert by this key
+  @@unique([orgId, date, channel, campaignId, itemId])
+  @@index([orgId, date])
+  @@index([orgId, sku])
+  @@map("ad_spend")
+}

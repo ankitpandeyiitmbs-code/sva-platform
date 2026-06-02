@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { syncOrders, syncInventory, getStatus, validateCredentials } from '../services/walmart.service'
+import { syncWalmartAdSpend } from '../services/walmart-ads.service'
 import { prisma } from '../lib/db'
 
 export async function walmartRoutes(app: FastifyInstance) {
@@ -48,6 +49,19 @@ export async function walmartRoutes(app: FastifyInstance) {
         })
       }
     })()
+  })
+
+  // POST /walmart/sync-ads — pull Walmart Connect ad spend for date range
+  app.post('/sync-ads', async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ success: false })
+    const { startDate, endDate } = (req.body as any) ?? {}
+    try {
+      const result = await syncWalmartAdSpend(req.user.orgId, startDate, endDate)
+      return reply.send({ success: true, data: result })
+    } catch (err: any) {
+      req.log.error(`Walmart ads sync failed: ${err.message}`)
+      return reply.code(500).send({ success: false, message: err.message })
+    }
   })
 
   // DELETE /walmart/disconnect

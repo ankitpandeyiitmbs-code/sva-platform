@@ -724,12 +724,13 @@ export default function ChannelPage() {
       {tab === 'profit' && (
         <div className="space-y-5">
           {/* Summary KPI cards */}
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 xl:grid-cols-5 gap-4">
             {[
-              { label: 'Net Profit', value: profitLoading ? null : formatCurrency(profitData?.summary?.netProfit ?? 0), sub: profitLoading ? null : `${profitData?.summary?.margin ?? 0}% margin`, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/30', icon: TrendingUp },
+              { label: 'Net Profit', value: profitLoading ? null : formatCurrency(profitData?.summary?.netProfit ?? 0), sub: profitLoading ? null : `${profitData?.summary?.margin ?? 0}% margin (after ads)`, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/30', icon: TrendingUp },
               { label: 'Revenue', value: profitLoading ? null : formatCurrency(profitData?.summary?.revenue ?? 0), sub: profitLoading ? null : `${profitData?.summary?.orderCount ?? 0} orders`, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/30', icon: TrendingUp },
               { label: 'Total COGS', value: profitLoading ? null : formatCurrency(profitData?.summary?.cogs ?? 0), sub: 'Cost of goods', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/30', icon: Package },
               { label: 'Walmart Fees', value: profitLoading ? null : formatCurrency(profitData?.summary?.totalFees ?? 0), sub: 'Referral + fulfillment', color: 'text-red-600', bg: 'bg-red-50 dark:bg-red-950/30', icon: ShoppingCart },
+              { label: 'Ad Spend', value: profitLoading ? null : formatCurrency(profitData?.summary?.adSpend ?? 0), sub: profitLoading ? null : `${profitData?.summary?.acos ?? 0}% ACoS`, color: 'text-purple-600', bg: 'bg-purple-50 dark:bg-purple-950/30', icon: TrendingUp },
             ].map(card => (
               <div key={card.label} className="rounded-xl border p-5">
                 <div className="flex items-start justify-between">
@@ -755,6 +756,9 @@ export default function ChannelPage() {
               <span className="text-muted-foreground">−</span>
               <span className="font-medium text-red-600">{formatCurrency(profitData.summary.totalFees)}</span>
               <span className="text-muted-foreground">Fees</span>
+              <span className="text-muted-foreground">−</span>
+              <span className="font-medium text-purple-600">{formatCurrency(profitData.summary.adSpend ?? 0)}</span>
+              <span className="text-muted-foreground">Ads</span>
               <span className="text-muted-foreground">=</span>
               <span className={cn('font-bold text-lg', (profitData.summary.netProfit ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600')}>
                 {formatCurrency(profitData.summary.netProfit)} Net Profit
@@ -784,23 +788,25 @@ export default function ChannelPage() {
           )}
 
           {/* Per-product P&L table */}
-          <div className="rounded-xl border overflow-hidden">
+          <div className="rounded-xl border overflow-hidden overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-muted/40">
                 <tr>
-                  {['SKU','Units','Revenue','COGS','Ref. Fee','Fulfill. Fee','Total Fees','Net Payout','Net Profit','Margin'].map(h =>
-                    <th key={h} className="px-3 py-3 text-left font-medium text-muted-foreground">{h}</th>
+                  {['SKU','Units','Revenue','COGS','Ref. Fee','Fulfill. Fee','Total Fees','Ad Spend','ACoS','Net Profit','Margin'].map(h =>
+                    <th key={h} className="px-3 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">{h}</th>
                   )}
                 </tr>
               </thead>
               <tbody>
                 {profitLoading ? [...Array(8)].map((_,i) => (
-                  <tr key={i} className="border-t">{[...Array(10)].map((_,j) =>
+                  <tr key={i} className="border-t">{[...Array(11)].map((_,j) =>
                     <td key={j} className="px-3 py-3"><div className="h-3 rounded bg-muted animate-pulse w-12"/></td>
                   )}</tr>
                 )) : (profitData?.products ?? []).length === 0 ? (
-                  <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">No orders in this period</td></tr>
-                ) : (profitData?.products ?? []).map((p: any) => (
+                  <tr><td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">No orders in this period</td></tr>
+                ) : (profitData?.products ?? []).map((p: any) => {
+                  const finalProfit = p.netProfitAfterAd ?? p.netProfit
+                  return (
                   <tr key={p.sku} className={cn('border-t hover:bg-muted/10', !p.hasCosts && 'opacity-50')}>
                     <td className="px-3 py-2 font-mono text-muted-foreground max-w-[100px] truncate">{p.sku}</td>
                     <td className="px-3 py-2 tabular-nums">{p.units}</td>
@@ -809,15 +815,18 @@ export default function ChannelPage() {
                     <td className="px-3 py-2 tabular-nums text-red-500">{p.hasCosts ? formatCurrency(p.refFee) : '—'}</td>
                     <td className="px-3 py-2 tabular-nums text-red-500">{p.hasCosts ? formatCurrency(p.fulfillmentFee) : '—'}</td>
                     <td className="px-3 py-2 tabular-nums text-red-600 font-medium">{p.hasCosts ? formatCurrency(p.totalFees) : '—'}</td>
-                    <td className="px-3 py-2 tabular-nums">{p.hasCosts ? formatCurrency(p.netPayout) : '—'}</td>
-                    <td className={cn('px-3 py-2 tabular-nums font-bold', p.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600')}>
-                      {p.hasCosts ? formatCurrency(p.netProfit) : '—'}
+                    <td className="px-3 py-2 tabular-nums text-purple-600">{(p.adSpend ?? 0) > 0 ? formatCurrency(p.adSpend) : '—'}</td>
+                    <td className={cn('px-3 py-2 tabular-nums', (p.acos ?? 0) > 30 ? 'text-red-600' : (p.acos ?? 0) > 15 ? 'text-amber-600' : 'text-muted-foreground')}>
+                      {(p.adSpend ?? 0) > 0 ? `${p.acos}%` : '—'}
+                    </td>
+                    <td className={cn('px-3 py-2 tabular-nums font-bold', finalProfit >= 0 ? 'text-emerald-600' : 'text-red-600')}>
+                      {p.hasCosts ? formatCurrency(finalProfit) : '—'}
                     </td>
                     <td className={cn('px-3 py-2 tabular-nums', p.margin >= 20 ? 'text-emerald-600' : p.margin >= 10 ? 'text-amber-600' : 'text-red-600')}>
                       {p.hasCosts ? `${p.margin}%` : '—'}
                     </td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
           </div>
