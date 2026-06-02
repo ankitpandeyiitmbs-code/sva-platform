@@ -4,6 +4,10 @@ import { prisma } from '../lib/db'
 // Statuses that represent real sales (excludes cancelled/unfulfillable)
 const ACTIVE_STATUSES = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'COMPLETED']
 
+// Walmart referral fee rate for our category (Health & Beauty - Aromatherapy)
+// CSV-verified: actual fees average ~11.97% of sale price
+const WALMART_REFERRAL_RATE = 0.12
+
 export async function orderRoutes(app: FastifyInstance) {
   app.get('/', async (req, reply) => {
     if (!req.user) return reply.code(401).send({ success: false })
@@ -162,9 +166,12 @@ export async function orderRoutes(app: FastifyInstance) {
         const qty = item.quantity
         const revenue = Number(item.total)
         const cogs = costs ? costs.cogs * qty : 0
-        const refFee = costs ? costs.refFee * qty : 0
+        // Referral fee = % of ACTUAL sale price (matches how Walmart bills it)
+        // Static refFee in WALMART_COSTS uses MSRP, so it overstates fees on promo sales.
+        const refFee = revenue * WALMART_REFERRAL_RATE
+        // Fulfillment fee (shipping label cost) is roughly static per SKU based on size/weight
         const fulfillmentFee = costs ? costs.fulfillmentFee * qty : 0
-        const totalItemFees = costs ? costs.totalFees * qty : 0
+        const totalItemFees = refFee + fulfillmentFee
         const netPayout = revenue - totalItemFees
         const netProfit = netPayout - cogs
 
